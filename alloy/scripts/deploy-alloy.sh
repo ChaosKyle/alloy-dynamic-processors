@@ -87,9 +87,13 @@ ENABLE_RESOURCE_DETECTION=true
 DETECT_DOCKER=true
 DETECT_SYSTEM=true
 DETECT_PROCESS=true
+
+# AI Sorter Configuration
+GROK_API_KEY=your-grok-api-key-here
+AI_SORTER_ENABLED=false
 EOF
     
-    print_warning "Please update the .env file with your Grafana Cloud credentials before proceeding."
+    print_warning "Please update the .env file with your Grafana Cloud credentials and Grok API key before proceeding."
 }
 
 validate_config() {
@@ -110,8 +114,31 @@ validate_config() {
     print_status "Configuration validation completed ✓"
 }
 
+build_ai_sorter() {
+    print_status "Building AI sorter Docker image..."
+    
+    # Check if AI sorter is enabled
+    if [ "${AI_SORTER_ENABLED:-false}" = "true" ]; then
+        # Build the AI sorter image
+        docker build -t ghcr.io/chaoskyle/alloy-ai-sorter:latest alloy/processors/ai_sorter/
+        
+        # Push to registry (optional, requires authentication)
+        if [ "${PUSH_AI_SORTER_IMAGE:-false}" = "true" ]; then
+            print_status "Pushing AI sorter image to registry..."
+            docker push ghcr.io/chaoskyle/alloy-ai-sorter:latest
+        fi
+        
+        print_status "AI sorter image built successfully ✓"
+    else
+        print_status "AI sorter disabled, skipping image build"
+    fi
+}
+
 deploy() {
     print_status "Deploying Grafana Alloy stack..."
+    
+    # Build AI sorter image if needed
+    build_ai_sorter
     
     # Create necessary directories
     mkdir -p tmp
@@ -282,6 +309,7 @@ show_help() {
     echo "  restart     Restart the stack"
     echo "  cleanup     Stop and remove volumes"
     echo "  test        Run basic connectivity tests"
+    echo "  build-ai    Build AI sorter Docker image"
     echo "  help        Show this help message"
     echo ""
     echo "Options:"
@@ -291,9 +319,15 @@ show_help() {
     echo "Examples:"
     echo "  $0 deploy"
     echo "  $0 logs grafana-alloy"
-    echo "  $0 deploy --config basic-template"
+    echo "  $0 deploy --config ai_sorter"
+    echo "  $0 build-ai"
     echo "  $0 status"
     echo "  $0 test"
+    echo ""
+    echo "AI Sorter Configuration:"
+    echo "  Set AI_SORTER_ENABLED=true in .env to enable AI sorter"
+    echo "  Set GROK_API_KEY in .env with your Grok API key"
+    echo "  Use --config ai_sorter to deploy with AI sorting enabled"
 }
 
 # Parse command line arguments
@@ -350,6 +384,9 @@ case "$COMMAND" in
         ;;
     test)
         test_alloy
+        ;;
+    build-ai)
+        build_ai_sorter
         ;;
     help|--help)
         show_help
