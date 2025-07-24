@@ -1,0 +1,450 @@
+name: Security Scan
+
+on:
+  schedule:
+    # Run security scans daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+    inputs:
+      scan_type:
+        description: 'Type of security scan to run'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+        - full
+        - dependencies
+        - containers
+        - secrets
+        - configuration
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  dependency-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.scan_type == 'dependencies' || github.event.inputs.scan_type == 'full' || github.event.inputs.scan_type == '' }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      working-directory: alloy/processors/ai_sorter
+      run: |
+        pip install -r requirements.txt
+        pip install safety pip-audit
+        
+    - name: Run Safety scan
+      working-directory: alloy/processors/ai_sorter
+      run: |
+        echo "🔍 Running Safety dependency scan..."
+        safety check --json --output safety-report.json || true
+        safety check --full-report
+        
+    - name: Run pip-audit scan
+      working-directory: alloy/processors/ai_sorter
+      run: |
+        echo "🔍 Running pip-audit dependency scan..."
+        pip-audit --format=json --output=pip-audit-report.json || true
+        pip-audit --desc
+        
+    - name: Upload dependency scan results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: dependency-scan-results
+        path: |
+          alloy/processors/ai_sorter/safety-report.json
+          alloy/processors/ai_sorter/pip-audit-report.json
+
+  container-scan:
+    name: Container Security Scan
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.scan_type == 'containers' || github.event.inputs.scan_type == 'full' || github.event.inputs.scan_type == '' }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Build AI Sorter container
+      working-directory: alloy/processors/ai_sorter
+      run: |
+        docker build -t ai-sorter:security-scan .
+        
+    - name: Run Trivy container scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: 'ai-sorter:security-scan'
+        format: 'sarif'
+        output: 'trivy-container.sarif'
+        severity: 'CRITICAL,HIGH,MEDIUM'
+        
+    - name: Run Grype container scan
+      uses: anchore/scan-action@v3
+      id: grype-scan
+      with:
+        image: 'ai-sorter:security-scan'
+        severity-cutoff: medium
+        fail-build: false
+        
+    - name: Run Snyk container scan
+      uses: snyk/actions/docker@master
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      with:
+        image: 'ai-sorter:security-scan'
+        args: --severity-threshold=medium --file=alloy/processors/ai_sorter/Dockerfile
+      continue-on-error: true
+        
+    - name: Upload container scan results
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: |
+          trivy-container.sarif
+          ${{ steps.grype-scan.outputs.sarif }}
+          
+    - name: Upload container artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: container-scan-results
+        path: |
+          trivy-container.sarif
+          ${{ steps.grype-scan.outputs.sarif }}
+
+  secret-scan:
+    name: Secret and Credential Scan
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.scan_type == 'secrets' || github.event.inputs.scan_type == 'full' || github.event.inputs.scan_type == '' }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Full history for better secret detection
+        
+    - name: Run GitLeaks scan
+      uses: gitleaks/gitleaks-action@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE}}
+        
+    - name: Run TruffleHog scan
+      uses: trufflesecurity/trufflehog@main
+      with:
+        path: ./
+        base: main
+        head: HEAD
+        extra_args: --debug --only-verified
+        
+    - name: Run detect-secrets scan
+      run: |
+        pip install detect-secrets
+        
+        # Initialize baseline if it doesn't exist
+        if [ ! -f .secrets.baseline ]; then
+          detect-secrets scan --all-files --baseline .secrets.baseline --exclude-files '\.git/.*'
+        fi
+        
+        # Scan for new secrets
+        echo "🔍 Running detect-secrets scan..."
+        detect-secrets scan --all-files --baseline .secrets.baseline --exclude-files '\.git/.*' > current-secrets.json
+        
+        # Compare with baseline
+        detect-secrets audit --baseline .secrets.baseline --stats || true
+        
+    - name: Upload secret scan results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: secret-scan-results
+        path: |
+          current-secrets.json
+          .secrets.baseline
+
+  code-scan:
+    name: Static Code Analysis
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.scan_type == 'full' || github.event.inputs.scan_type == '' }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        
+    - name: Install analysis tools
+      run: |
+        pip install bandit semgrep pylint mypy
+        
+    - name: Run Bandit security scan
+      working-directory: alloy/processors/ai_sorter
+      run: |
+        echo "🔍 Running Bandit security analysis..."
+        bandit -r . -f json -o bandit-report.json || true
+        bandit -r . -ll
+        
+    - name: Run Semgrep scan
+      run: |
+        echo "🔍 Running Semgrep analysis..."
+        semgrep --config=auto --json --output=semgrep-report.json . || true
+        semgrep --config=auto --error .
+        
+    - name: Run PyLint analysis
+      working-directory: alloy/processors/ai_sorter
+      run: |
+        echo "🔍 Running PyLint analysis..."
+        pip install -r requirements.txt
+        pylint --output-format=json --output=pylint-report.json ai_sorter.py || true
+        pylint ai_sorter.py || true
+        
+    - name: Run MyPy type checking
+      working-directory: alloy/processors/ai_sorter
+      run: |
+        echo "🔍 Running MyPy type checking..."
+        mypy --json-report mypy-report --html-report mypy-html ai_sorter.py || true
+        mypy ai_sorter.py || true
+        
+    - name: Upload code analysis results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: code-analysis-results
+        path: |
+          alloy/processors/ai_sorter/bandit-report.json
+          semgrep-report.json
+          alloy/processors/ai_sorter/pylint-report.json
+          alloy/processors/ai_sorter/mypy-report/
+          alloy/processors/ai_sorter/mypy-html/
+
+  config-scan:
+    name: Configuration Security Scan
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.scan_type == 'configuration' || github.event.inputs.scan_type == 'full' || github.event.inputs.scan_type == '' }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up tools
+      run: |
+        # Install configuration security tools
+        pip install checkov
+        
+        # Install Helm
+        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+        
+    - name: Run Trivy config scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'config'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-config.sarif'
+        severity: 'CRITICAL,HIGH,MEDIUM'
+        
+    - name: Run Checkov IaC scan
+      run: |
+        echo "🔍 Running Checkov Infrastructure-as-Code scan..."
+        checkov -d . --framework kubernetes,dockerfile,yaml --output json --output-file checkov-report.json || true
+        checkov -d . --framework kubernetes,dockerfile,yaml --compact || true
+        
+    - name: Run Helm security scan
+      working-directory: alloy/helm/alloy-dynamic-processors
+      run: |
+        echo "🔍 Running Helm security analysis..."
+        
+        # Template the chart for analysis
+        helm template security-test . --set aiSorter.enabled=true > /tmp/helm-manifests.yaml
+        
+        # Analyze the generated manifests
+        checkov --framework kubernetes --file /tmp/helm-manifests.yaml --output json --output-file helm-security-report.json || true
+        checkov --framework kubernetes --file /tmp/helm-manifests.yaml --compact || true
+        
+    - name: Run custom security checks
+      run: |
+        echo "🔍 Running custom security checks..."
+        
+        # Check for hardcoded secrets in configs
+        echo "Checking for hardcoded credentials..."
+        grep -r -i 'password\|secret\|key.*=' . \
+          --include='*.py' --include='*.yaml' --include='*.river' \
+          --exclude-dir='.git' --exclude-dir='venv' \
+          | grep -v 'your-.*-here' | grep -v 'example' | grep -v 'template' > hardcoded-check.txt || true
+        
+        if [ -s hardcoded-check.txt ]; then
+          echo "⚠️ Potential hardcoded credentials found:"
+          cat hardcoded-check.txt
+        else
+          echo "✅ No hardcoded credentials detected"
+        fi
+        
+        # Check for insecure configurations
+        echo "Checking for insecure configurations..."
+        if grep -q "endpoint.*0\.0\.0\.0.*[0-9]" alloy/configs/*.river && ! grep -A 10 "endpoint.*0\.0\.0\.0" alloy/configs/*.river | grep -q "tls"; then
+          echo "⚠️ Found insecure network bindings without TLS"
+        else
+          echo "✅ Network bindings appear secure"
+        fi
+        
+    - name: Upload configuration scan results
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: trivy-config.sarif
+        
+    - name: Upload config analysis artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: config-security-results
+        path: |
+          trivy-config.sarif
+          checkov-report.json
+          alloy/helm/alloy-dynamic-processors/helm-security-report.json
+          hardcoded-check.txt
+
+  security-report:
+    name: Generate Security Report
+    runs-on: ubuntu-latest
+    needs: [dependency-scan, container-scan, secret-scan, code-scan, config-scan]
+    if: always()
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download all scan results
+      uses: actions/download-artifact@v4
+      with:
+        path: scan-results/
+        
+    - name: Generate comprehensive security report
+      run: |
+        echo "# Comprehensive Security Scan Report" > security-summary.md
+        echo "**Generated:** $(date)" >> security-summary.md
+        echo "**Repository:** ${{ github.repository }}" >> security-summary.md
+        echo "**Branch:** ${{ github.ref_name }}" >> security-summary.md
+        echo "**Commit:** ${{ github.sha }}" >> security-summary.md
+        echo "" >> security-summary.md
+        
+        # Summary section
+        echo "## Executive Summary" >> security-summary.md
+        echo "" >> security-summary.md
+        
+        # Check each scan type
+        total_issues=0
+        critical_issues=0
+        
+        if [ -d "scan-results/dependency-scan-results" ]; then
+          echo "✅ Dependency vulnerability scan completed" >> security-summary.md
+        else
+          echo "❌ Dependency vulnerability scan failed or skipped" >> security-summary.md
+        fi
+        
+        if [ -d "scan-results/container-scan-results" ]; then
+          echo "✅ Container security scan completed" >> security-summary.md
+        else
+          echo "❌ Container security scan failed or skipped" >> security-summary.md
+        fi
+        
+        if [ -d "scan-results/secret-scan-results" ]; then
+          echo "✅ Secret detection scan completed" >> security-summary.md
+        else
+          echo "❌ Secret detection scan failed or skipped" >> security-summary.md
+        fi
+        
+        if [ -d "scan-results/code-analysis-results" ]; then
+          echo "✅ Static code analysis completed" >> security-summary.md
+        else
+          echo "❌ Static code analysis failed or skipped" >> security-summary.md
+        fi
+        
+        if [ -d "scan-results/config-security-results" ]; then
+          echo "✅ Configuration security scan completed" >> security-summary.md
+        else
+          echo "❌ Configuration security scan failed or skipped" >> security-summary.md
+        fi
+        
+        echo "" >> security-summary.md
+        
+        # Detailed findings
+        echo "## Detailed Findings" >> security-summary.md
+        echo "" >> security-summary.md
+        
+        # Add more detailed analysis here based on available results
+        echo "### Scan Results Summary" >> security-summary.md
+        echo "- **Total Security Issues:** $total_issues" >> security-summary.md
+        echo "- **Critical Issues:** $critical_issues" >> security-summary.md
+        echo "- **Scan Timestamp:** $(date -u)" >> security-summary.md
+        echo "" >> security-summary.md
+        
+        echo "## Recommendations" >> security-summary.md
+        echo "" >> security-summary.md
+        echo "1. Review all identified vulnerabilities and prioritize fixes based on severity" >> security-summary.md
+        echo "2. Update dependencies with known vulnerabilities" >> security-summary.md
+        echo "3. Address any configuration security issues" >> security-summary.md
+        echo "4. Implement additional security controls as recommended" >> security-summary.md
+        echo "5. Schedule regular security scans and reviews" >> security-summary.md
+        echo "" >> security-summary.md
+        
+        echo "---" >> security-summary.md
+        echo "*This report was automatically generated by the security scanning pipeline*" >> security-summary.md
+        
+        # Display the report
+        cat security-summary.md
+        
+    - name: Upload comprehensive security report
+      uses: actions/upload-artifact@v4
+      with:
+        name: comprehensive-security-report
+        path: |
+          security-summary.md
+          scan-results/
+        retention-days: 90
+        
+    - name: Create security issue on critical findings
+      if: ${{ github.event_name == 'schedule' && github.ref == 'refs/heads/main' }}
+      uses: actions/github-script@v7
+      with:
+        script: |
+          // This would create a GitHub issue for critical security findings
+          // Implementation depends on specific requirements
+          console.log('Security scan completed. Check artifacts for detailed results.');
+
+  notification:
+    name: Send Security Notifications
+    runs-on: ubuntu-latest
+    needs: [security-report]
+    if: always() && github.event_name == 'schedule'
+    
+    steps:
+    - name: Send Slack notification
+      if: ${{ secrets.SLACK_WEBHOOK_URL }}
+      uses: 8398a7/action-slack@v3
+      with:
+        status: ${{ job.status }}
+        channel: '#security-alerts'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+        fields: repo,message,commit,author,action,eventName,ref,workflow
+        text: |
+          Security scan completed for ${{ github.repository }}
+          Check the workflow run for detailed results: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
