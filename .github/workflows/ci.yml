@@ -84,11 +84,62 @@ jobs:
       run: |
         go install github.com/grafana/alloy/cmd/alloy@latest
         
-    - name: Validate Alloy configurations
+    - name: Validate Alloy configuration syntax
       run: |
+        echo "🔍 Validating Alloy configuration syntax..."
+        exit_code=0
+        
         for config in alloy/configs/*.river; do
-          echo "Validating $config"
-          alloy fmt --verify "$config" || echo "Warning: $config failed validation"
+          echo "Validating $(basename $config)..."
+          if alloy fmt --verify "$config"; then
+            echo "✅ $(basename $config) syntax is valid"
+          else
+            echo "❌ $(basename $config) has syntax errors"
+            exit_code=1
+          fi
+        done
+        
+        if [ $exit_code -ne 0 ]; then
+          echo "Configuration validation failed!"
+          exit 1
+        fi
+        echo "All Alloy configurations passed syntax validation!"
+        
+    - name: Test Alloy configuration conversion
+      run: |
+        echo "🔄 Testing Alloy configuration conversion..."
+        
+        # Test that configurations can be processed
+        for config in alloy/configs/*.river; do
+          echo "Testing conversion for $(basename $config)..."
+          if alloy convert --source-format=alloy --target-format=alloy "$config" > /dev/null; then
+            echo "✅ $(basename $config) conversion successful"
+          else
+            echo "❌ $(basename $config) conversion failed"
+            exit 1
+          fi
+        done
+        
+    - name: Validate configuration completeness
+      run: |
+        echo "🔎 Validating configuration completeness..."
+        
+        # Check that all configurations have required components
+        for config in alloy/configs/*.river; do
+          echo "Checking completeness of $(basename $config)..."
+          
+          # Check for essential components
+          if ! grep -q "otelcol.receiver" "$config"; then
+            echo "❌ $(basename $config) missing receiver configuration"
+            exit 1
+          fi
+          
+          if ! grep -q "otelcol.exporter" "$config"; then
+            echo "❌ $(basename $config) missing exporter configuration"
+            exit 1
+          fi
+          
+          echo "✅ $(basename $config) has required components"
         done
         
   security-scan:
