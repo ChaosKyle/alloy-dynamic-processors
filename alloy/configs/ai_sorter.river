@@ -1,0 +1,211 @@
+// AI Sorter Configuration for Grafana Alloy
+// This configuration integrates with the AI sorter sidecar for intelligent telemetry classification
+
+// OTLP Receiver for incoming telemetry data
+otelcol.receiver.otlp "default" {
+    grpc {
+        endpoint = "0.0.0.0:4317"
+    }
+    
+    http {
+        endpoint = "0.0.0.0:4318"
+    }
+
+    output {
+        metrics = [otelcol.processor.memory_limiter.default.input]
+        logs    = [otelcol.processor.memory_limiter.default.input]
+        traces  = [otelcol.processor.memory_limiter.default.input]
+    }
+}
+
+// Memory limiter to prevent OOM
+otelcol.processor.memory_limiter "default" {
+    limit_mib        = 512
+    spike_limit_mib  = 128
+    check_interval   = "1s"
+
+    output {
+        metrics = [otelcol.processor.batch.ai_batch.input]
+        logs    = [otelcol.processor.batch.ai_batch.input]
+        traces  = [otelcol.processor.batch.ai_batch.input]
+    }
+}
+
+// Batch processor for AI analysis
+otelcol.processor.batch "ai_batch" {
+    send_batch_size     = 50
+    timeout             = "10s"
+    send_batch_max_size = 100
+
+    output {
+        metrics = [otelcol.processor.attributes.ai_labels.input]
+        logs    = [otelcol.processor.attributes.ai_labels.input]
+        traces  = [otelcol.processor.attributes.ai_labels.input]
+    }
+}
+
+// Add AI classification attributes
+otelcol.processor.attributes "ai_labels" {
+    action {
+        key    = "ai.processed"
+        value  = "true"
+        action = "insert"
+    }
+    
+    action {
+        key           = "ai.category"
+        from_attribute = "ai_category"
+        action        = "insert"
+    }
+    
+    action {
+        key           = "ai.forward_to"
+        from_attribute = "ai_forward_to"
+        action        = "insert"
+    }
+
+    output {
+        metrics = [otelcol.processor.routing.ai_router.input]
+        logs    = [otelcol.processor.routing.ai_router.input]
+        traces  = [otelcol.processor.routing.ai_router.input]
+    }
+}
+
+// Route based on AI classification
+otelcol.processor.routing "ai_router" {
+    from_attribute = "ai.forward_to"
+    default_pipelines = ["storage"]
+    
+    table = [
+        {
+            value    = "alerting"
+            pipelines = ["alerting"]
+        },
+        {
+            value    = "storage" 
+            pipelines = ["storage"]
+        },
+        {
+            value    = "archive"
+            pipelines = ["archive"]
+        },
+    ]
+
+    output {
+        // Define outputs for each pipeline
+        metrics = [
+            otelcol.exporter.prometheus.alerting.input,
+            otelcol.exporter.prometheus.storage.input,
+            otelcol.exporter.prometheus.archive.input,
+        ]
+        logs    = [
+            otelcol.exporter.loki.alerting.input,
+            otelcol.exporter.loki.storage.input,
+            otelcol.exporter.loki.archive.input,
+        ]
+        traces  = [
+            otelcol.exporter.otlp.alerting.input,
+            otelcol.exporter.otlp.storage.input,
+            otelcol.exporter.otlp.archive.input,
+        ]
+    }
+}
+
+// Critical/Alerting Pipeline Exporters
+otelcol.exporter.prometheus "alerting" {
+    endpoint {
+        url = env("GRAFANA_CLOUD_PROMETHEUS_URL")
+        
+        basic_auth {
+            username = env("GRAFANA_CLOUD_INSTANCE_ID")
+            password = env("GRAFANA_CLOUD_API_KEY")
+        }
+    }
+}
+
+otelcol.exporter.loki "alerting" {
+    endpoint {
+        url = env("GRAFANA_CLOUD_LOKI_URL")
+        
+        basic_auth {
+            username = env("GRAFANA_CLOUD_INSTANCE_ID")
+            password = env("GRAFANA_CLOUD_API_KEY")
+        }
+    }
+}
+
+otelcol.exporter.otlp "alerting" {
+    client {
+        endpoint = env("GRAFANA_CLOUD_TEMPO_URL")
+        
+        auth = otelcol.auth.basic.grafana_cloud.handler
+    }
+}
+
+// Storage Pipeline Exporters
+otelcol.exporter.prometheus "storage" {
+    endpoint {
+        url = env("GRAFANA_CLOUD_PROMETHEUS_URL")
+        
+        basic_auth {
+            username = env("GRAFANA_CLOUD_INSTANCE_ID")
+            password = env("GRAFANA_CLOUD_API_KEY")
+        }
+    }
+}
+
+otelcol.exporter.loki "storage" {
+    endpoint {
+        url = env("GRAFANA_CLOUD_LOKI_URL")
+        
+        basic_auth {
+            username = env("GRAFANA_CLOUD_INSTANCE_ID")
+            password = env("GRAFANA_CLOUD_API_KEY")
+        }
+    }
+}
+
+otelcol.exporter.otlp "storage" {
+    client {
+        endpoint = env("GRAFANA_CLOUD_TEMPO_URL")
+        
+        auth = otelcol.auth.basic.grafana_cloud.handler
+    }
+}
+
+// Archive Pipeline Exporters (could be different endpoints or with different configs)
+otelcol.exporter.prometheus "archive" {
+    endpoint {
+        url = env("GRAFANA_CLOUD_PROMETHEUS_URL")
+        
+        basic_auth {
+            username = env("GRAFANA_CLOUD_INSTANCE_ID")
+            password = env("GRAFANA_CLOUD_API_KEY")
+        }
+    }
+}
+
+otelcol.exporter.loki "archive" {
+    endpoint {
+        url = env("GRAFANA_CLOUD_LOKI_URL")
+        
+        basic_auth {
+            username = env("GRAFANA_CLOUD_INSTANCE_ID")
+            password = env("GRAFANA_CLOUD_API_KEY")
+        }
+    }
+}
+
+otelcol.exporter.otlp "archive" {
+    client {
+        endpoint = env("GRAFANA_CLOUD_TEMPO_URL")
+        
+        auth = otelcol.auth.basic.grafana_cloud.handler
+    }
+}
+
+// Grafana Cloud authentication
+otelcol.auth.basic "grafana_cloud" {
+    username = env("GRAFANA_CLOUD_INSTANCE_ID")
+    password = env("GRAFANA_CLOUD_API_KEY")
+}

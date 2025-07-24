@@ -1,0 +1,19 @@
+{{- if .Values.aiSorter.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "alloy.fullname" . }}-ai-sorter
+  labels:
+    {{- include "alloy.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ai-sorter
+spec:
+  type: {{ .Values.aiSorter.service.type }}
+  ports:
+    - port: {{ .Values.aiSorter.service.port }}
+      targetPort: ai-sorter
+      protocol: TCP
+      name: ai-sorter
+  selector:
+    {{- include "alloy.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: ai-sorter
+{{- end }}

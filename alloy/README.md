@@ -19,6 +19,7 @@ This Alloy implementation provides **identical core functionality** to the origi
 ## 📚 Table of Contents
 
 - [🚀 Quick Start](#-quick-start)
+- [🤖 AI-Driven Intelligent Sorting](#-ai-driven-intelligent-sorting)
 - [🏗️ Architecture Overview](#️-architecture-overview)
 - [🔧 Alloy vs OTel Collector](#-alloy-vs-otel-collector)
 - [⚙️ Configuration](#️-configuration)
@@ -52,6 +53,10 @@ ENVIRONMENT=development
 SERVICE_NAMESPACE=alloy-monitoring
 CLUSTER_NAME=local-alloy-cluster
 REGION=us-west-2
+
+# AI Sorter Configuration (optional)
+GROK_API_KEY=your-grok-api-key-here
+AI_SORTER_ENABLED=false
 EOF
 ```
 
@@ -86,6 +91,87 @@ EOF
 - **Prometheus**: http://localhost:9090
 - **Health Check**: http://localhost:13133
 - **Metrics**: http://localhost:8889/metrics
+
+## 🤖 AI-Driven Intelligent Sorting
+
+This feature adds a FastAPI sidecar to classify and route telemetry data using an AI API (e.g., xAI Grok). It processes logs, metrics, or traces, assigns categories (e.g., critical, info), and forwards them to appropriate destinations.
+
+### Features
+
+- **🧠 AI-Powered Classification**: Uses xAI Grok API to intelligently classify telemetry data
+- **🎯 Smart Routing**: Routes data based on AI classification to different destinations:
+  - **Critical**: High-priority data sent to alerting systems
+  - **Warning**: Medium-priority data sent to storage
+  - **Info**: Low-priority data sent to archive
+- **🔄 Real-time Processing**: FastAPI sidecar processes telemetry in real-time
+- **🛡️ Secure**: API keys managed through Kubernetes secrets
+- **📊 Monitoring**: Built-in health checks and metrics
+
+### Quick Setup
+
+1. **Enable AI Sorter**:
+   ```bash
+   # Set in your .env file
+   AI_SORTER_ENABLED=true
+   GROK_API_KEY=your-grok-api-key-here
+   ```
+
+2. **Deploy with AI Sorting**:
+   ```bash
+   # Deploy with AI sorter configuration
+   ./scripts/deploy-alloy.sh deploy --config ai_sorter
+   
+   # Or build AI sorter image separately
+   ./scripts/deploy-alloy.sh build-ai
+   ```
+
+3. **Kubernetes Deployment**:
+   ```bash
+   # Create secret for API key
+   kubectl create secret generic ai-sorter-secrets \
+     --from-literal=grok-api-key=your-grok-api-key-here
+   
+   # Deploy with Helm
+   helm upgrade alloy helm/ --set aiSorter.enabled=true
+   ```
+
+### Configuration
+
+Configure Alloy to use AI sorting in your River configuration:
+
+```hcl
+// Use the ai_sorter.river configuration
+otelcol.receiver.otlp "default" {
+    // ... receiver config
+}
+
+otelcol.processor.batch "ai_batch" {
+    // Batches data for AI analysis
+}
+
+otelcol.processor.routing "ai_router" {
+    // Routes based on AI classification
+    from_attribute = "ai.forward_to"
+    
+    table = [
+        { value = "alerting", pipelines = ["alerting"] },
+        { value = "storage", pipelines = ["storage"] },
+        { value = "archive", pipelines = ["archive"] },
+    ]
+}
+```
+
+### Example
+
+- Logs with "error" patterns are classified as "critical" and sent to Alertmanager
+- Performance metrics are classified as "warning" and sent to long-term storage
+- Debug logs are classified as "info" and sent to archive storage
+
+### API Endpoints
+
+The AI sorter sidecar exposes:
+- `POST /sort` - Classify telemetry data
+- `GET /health` - Health check endpoint
 
 ## 🏗️ Architecture Overview
 

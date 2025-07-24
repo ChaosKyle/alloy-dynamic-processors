@@ -1,0 +1,129 @@
+{{- if .Values.aiSorter.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "alloy.fullname" . }}-ai-sorter
+  labels:
+    {{- include "alloy.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ai-sorter
+spec:
+  replicas: {{ .Values.aiSorter.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "alloy.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: ai-sorter
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.aiSorter.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "alloy.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: ai-sorter
+    spec:
+      {{- with .Values.aiSorter.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "alloy.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.aiSorter.podSecurityContext | nindent 8 }}
+      containers:
+      - name: alloy
+        securityContext:
+          {{- toYaml .Values.alloy.securityContext | nindent 12 }}
+        image: "{{ .Values.alloy.image.repository }}:{{ .Values.alloy.image.tag | default .Chart.AppVersion }}"
+        imagePullPolicy: {{ .Values.alloy.image.pullPolicy }}
+        args:
+          - "run"
+          - "/etc/alloy/ai_sorter.river"
+          - "--server.http.listen-addr=0.0.0.0:12345"
+          - "--stability.level=generally-available"
+        ports:
+        - name: http-metrics
+          containerPort: 12345
+          protocol: TCP
+        - name: otlp-grpc
+          containerPort: 4317
+          protocol: TCP
+        - name: otlp-http
+          containerPort: 4318
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /-/healthy
+            port: http-metrics
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /-/ready
+            port: http-metrics
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        resources:
+          {{- toYaml .Values.alloy.resources | nindent 12 }}
+        volumeMounts:
+        - name: config
+          mountPath: /etc/alloy
+        env:
+        {{- range $key, $value := .Values.alloy.env }}
+        - name: {{ $key }}
+          value: {{ $value | quote }}
+        {{- end }}
+        {{- if .Values.alloy.envFrom }}
+        envFrom:
+          {{- toYaml .Values.alloy.envFrom | nindent 12 }}
+        {{- end }}
+      - name: ai-sorter
+        securityContext:
+          {{- toYaml .Values.aiSorter.securityContext | nindent 12 }}
+        image: "{{ .Values.aiSorter.image.repository }}:{{ .Values.aiSorter.image.tag }}"
+        imagePullPolicy: {{ .Values.aiSorter.image.pullPolicy }}
+        env:
+        - name: GROK_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.aiSorter.secretName | default "ai-sorter-secrets" }}
+              key: {{ .Values.aiSorter.secretKeyName | default "grok-api-key" }}
+        {{- range $key, $value := .Values.aiSorter.env }}
+        - name: {{ $key }}
+          value: {{ $value | quote }}
+        {{- end }}
+        ports:
+        - name: ai-sorter
+          containerPort: 8000
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: ai-sorter
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: ai-sorter
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          {{- toYaml .Values.aiSorter.resources | nindent 12 }}
+      volumes:
+      - name: config
+        configMap:
+          name: {{ include "alloy.fullname" . }}-config
+      {{- with .Values.aiSorter.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.aiSorter.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.aiSorter.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

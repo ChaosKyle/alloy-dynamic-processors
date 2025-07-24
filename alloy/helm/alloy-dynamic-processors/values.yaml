@@ -252,6 +252,68 @@ commonLabels: {}
 # Additional annotations for all resources
 commonAnnotations: {}
 
+# AI Sorter configuration
+aiSorter:
+  # Enable AI sorter sidecar
+  enabled: false
+  
+  # Image configuration
+  image:
+    repository: ghcr.io/chaoskyle/alloy-ai-sorter
+    tag: latest
+    pullPolicy: IfNotPresent
+  
+  # Deployment configuration
+  replicaCount: 1
+  
+  # Resource configuration
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+  
+  # Security context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+  
+  # Pod security context
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+  
+  # Pod annotations
+  podAnnotations: {}
+  
+  # Image pull secrets
+  imagePullSecrets: []
+  
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 8000
+  
+  # Environment variables
+  env: {}
+  
+  # Secret configuration for API keys
+  secretName: "ai-sorter-secrets"
+  secretKeyName: "grok-api-key"
+  
+  # Node selection
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
 # Test pods configuration
 tests:
   enabled: true
