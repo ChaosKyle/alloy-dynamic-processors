@@ -1,0 +1,159 @@
+# Pre-commit configuration for Alloy Dynamic Processors
+# Install with: pre-commit install
+
+repos:
+  # General file quality checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.md$'
+      - id: end-of-file-fixer
+      - id: check-yaml
+        exclude: '^(alloy/helm/.*/templates/|\.github/workflows/)'
+      - id: check-json
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: mixed-line-ending
+        args: ['--fix=lf']
+
+  # Security checks
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+        exclude: '\.lock$'
+
+  # Python code quality (AI Sorter)
+  - repo: https://github.com/psf/black
+    rev: 23.12.1
+    hooks:
+      - id: black
+        files: '^alloy/processors/ai_sorter/.*\.py$'
+        language_version: python3.11
+
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        files: '^alloy/processors/ai_sorter/.*\.py$'
+        args: ["--profile", "black"]
+
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.0.0
+    hooks:
+      - id: flake8
+        files: '^alloy/processors/ai_sorter/.*\.py$'
+        args: [
+          '--max-line-length=88',
+          '--extend-ignore=E203,W503',
+          '--per-file-ignores=__init__.py:F401'
+        ]
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.8.0
+    hooks:
+      - id: mypy
+        files: '^alloy/processors/ai_sorter/.*\.py$'
+        additional_dependencies: [
+          'types-requests',
+          'types-PyYAML',
+          'fastapi',
+          'pydantic'
+        ]
+
+  # Python security checks
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.5
+    hooks:
+      - id: bandit
+        files: '^alloy/processors/ai_sorter/.*\.py$'
+        args: ['-r', '-f', 'json']
+        exclude: '^alloy/processors/ai_sorter/test_.*\.py$'
+
+  # Dockerfile linting
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.12.0
+    hooks:
+      - id: hadolint-docker
+        files: 'Dockerfile'
+
+  # YAML formatting
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v4.0.0-alpha.8
+    hooks:
+      - id: prettier
+        types: [yaml]
+        exclude: '^(alloy/helm/.*/templates/|\.github/workflows/)'
+
+  # Helm chart validation
+  - repo: local
+    hooks:
+      - id: helm-lint
+        name: Helm Chart Lint
+        entry: helm lint
+        language: system
+        files: '^alloy/helm/.*/(Chart\.yaml|values\.yaml|templates/.*)$'
+        args: ['alloy/helm/alloy-dynamic-processors']
+        pass_filenames: false
+
+  # Alloy configuration validation
+  - repo: local
+    hooks:
+      - id: alloy-config-validation
+        name: Alloy Configuration Validation
+        entry: ./scripts/validate-configs.sh
+        language: system
+        files: '^alloy/configs/.*\.river$'
+        pass_filenames: false
+
+  # Security scanning for container images
+  - repo: local
+    hooks:
+      - id: trivy-config-scan
+        name: Trivy Configuration Scan
+        entry: trivy config
+        language: system
+        files: '^(alloy/helm/|\.github/workflows/|alloy/processors/.*/Dockerfile).*$'
+        args: ['--exit-code', '1', '--severity', 'HIGH,CRITICAL', '.']
+        pass_filenames: false
+
+  # Documentation checks
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.38.0
+    hooks:
+      - id: markdownlint
+        args: ['--fix']
+        exclude: 'CHANGELOG\.md'
+
+  # Commit message validation
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.0.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: [
+          'feat', 'fix', 'docs', 'style', 'refactor', 
+          'test', 'chore', 'security', 'ci', 'build'
+        ]
+
+# Configuration for specific tools
+default_language_version:
+  python: python3.11
+
+default_stages: [commit]
+
+# Exclude patterns that shouldn't be checked
+exclude: |
+  (?x)^(
+    \.git/.*|
+    \.venv/.*|
+    __pycache__/.*|
+    \.pytest_cache/.*|
+    node_modules/.*|
+    \.tmp/.*|
+    tmp/.*
+  )$

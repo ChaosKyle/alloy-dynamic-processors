@@ -84,11 +84,62 @@ jobs:
       run: |
         go install github.com/grafana/alloy/cmd/alloy@latest
         
-    - name: Validate Alloy configurations
+    - name: Validate Alloy configuration syntax
       run: |
+        echo "🔍 Validating Alloy configuration syntax..."
+        exit_code=0
+        
         for config in alloy/configs/*.river; do
-          echo "Validating $config"
-          alloy fmt --verify "$config" || echo "Warning: $config failed validation"
+          echo "Validating $(basename $config)..."
+          if alloy fmt --verify "$config"; then
+            echo "✅ $(basename $config) syntax is valid"
+          else
+            echo "❌ $(basename $config) has syntax errors"
+            exit_code=1
+          fi
+        done
+        
+        if [ $exit_code -ne 0 ]; then
+          echo "Configuration validation failed!"
+          exit 1
+        fi
+        echo "All Alloy configurations passed syntax validation!"
+        
+    - name: Test Alloy configuration conversion
+      run: |
+        echo "🔄 Testing Alloy configuration conversion..."
+        
+        # Test that configurations can be processed
+        for config in alloy/configs/*.river; do
+          echo "Testing conversion for $(basename $config)..."
+          if alloy convert --source-format=alloy --target-format=alloy "$config" > /dev/null; then
+            echo "✅ $(basename $config) conversion successful"
+          else
+            echo "❌ $(basename $config) conversion failed"
+            exit 1
+          fi
+        done
+        
+    - name: Validate configuration completeness
+      run: |
+        echo "🔎 Validating configuration completeness..."
+        
+        # Check that all configurations have required components
+        for config in alloy/configs/*.river; do
+          echo "Checking completeness of $(basename $config)..."
+          
+          # Check for essential components
+          if ! grep -q "otelcol.receiver" "$config"; then
+            echo "❌ $(basename $config) missing receiver configuration"
+            exit 1
+          fi
+          
+          if ! grep -q "otelcol.exporter" "$config"; then
+            echo "❌ $(basename $config) missing exporter configuration"
+            exit 1
+          fi
+          
+          echo "✅ $(basename $config) has required components"
         done
         
   security-scan:
@@ -98,16 +149,138 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
-    - name: Run Trivy vulnerability scanner
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install security scanning tools
+      run: |
+        pip install bandit safety semgrep
+        
+    - name: Run Bandit security scan (Python)
+      working-directory: alloy/processors/ai_sorter
+      run: |
+        echo "🔍 Running Bandit security scan..."
+        bandit -r . -f json -o bandit-results.json || true
+        bandit -r . -f txt
+        
+    - name: Run Safety dependency scan (Python)
+      working-directory: alloy/processors/ai_sorter
+      run: |
+        echo "🔍 Scanning Python dependencies for vulnerabilities..."
+        pip install -r requirements.txt
+        safety check --json --output safety-results.json || true
+        safety check
+        
+    - name: Run Semgrep security scan
+      run: |
+        echo "🔍 Running Semgrep security analysis..."
+        semgrep --config=auto --error --json --output=semgrep-results.json . || true
+        semgrep --config=auto --error .
+        
+    - name: Run Trivy filesystem scan
       uses: aquasecurity/trivy-action@master
       with:
         scan-type: 'fs'
-        scan-ref: 'alloy/processors/ai_sorter'
+        scan-ref: '.'
         format: 'sarif'
-        output: 'trivy-results.sarif'
+        output: 'trivy-fs-results.sarif'
+        severity: 'CRITICAL,HIGH,MEDIUM'
         
-    - name: Upload Trivy scan results to GitHub Security tab
+    - name: Run Trivy configuration scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'config'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-config-results.sarif'
+        severity: 'CRITICAL,HIGH,MEDIUM'
+        
+    - name: Build AI Sorter image for scanning
+      working-directory: alloy/processors/ai_sorter
+      run: |
+        docker build -t ai-sorter-security-scan .
+        
+    - name: Run Trivy Docker image scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: 'ai-sorter-security-scan'
+        format: 'sarif'
+        output: 'trivy-image-results.sarif'
+        severity: 'CRITICAL,HIGH'
+        
+    - name: Run secret scanning with gitleaks
+      uses: gitleaks/gitleaks-action@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE}}
+        
+    - name: Upload security scan results
       uses: github/codeql-action/upload-sarif@v3
       if: always()
       with:
-        sarif_file: 'trivy-results.sarif'
+        sarif_file: |
+          trivy-fs-results.sarif
+          trivy-config-results.sarif
+          trivy-image-results.sarif
+          
+    - name: Generate security report
+      if: always()
+      run: |
+        echo "# Security Scan Summary" > security-report.md
+        echo "Generated: $(date)" >> security-report.md
+        echo "" >> security-report.md
+        
+        # Bandit results
+        if [ -f alloy/processors/ai_sorter/bandit-results.json ]; then
+          echo "## Python Security Issues (Bandit)" >> security-report.md
+          python -c "
+import json
+try:
+    with open('alloy/processors/ai_sorter/bandit-results.json') as f:
+        data = json.load(f)
+        issues = data.get('results', [])
+        if issues:
+            print(f'Found {len(issues)} security issues')
+            for issue in issues[:5]:  # Show first 5
+                print(f'- {issue.get(\"test_name\", \"Unknown\")}: {issue.get(\"issue_text\", \"No description\")}')
+        else:
+            print('No security issues found')
+except:
+    print('Could not parse Bandit results')
+" >> security-report.md
+        fi
+        
+        echo "" >> security-report.md
+        echo "## Dependency Vulnerabilities (Safety)" >> security-report.md
+        if [ -f alloy/processors/ai_sorter/safety-results.json ]; then
+          python -c "
+import json
+try:
+    with open('alloy/processors/ai_sorter/safety-results.json') as f:
+        data = json.load(f)
+        vulns = data.get('vulnerabilities', data.get('report', {}).get('vulnerabilities', []))
+        if vulns:
+            print(f'Found {len(vulns)} dependency vulnerabilities')
+        else:
+            print('No dependency vulnerabilities found')
+except:
+    print('Could not parse Safety results')
+" >> security-report.md
+        else
+          echo "No dependency vulnerabilities found" >> security-report.md
+        fi
+        
+        cat security-report.md
+        
+    - name: Upload security artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: security-scan-results
+        path: |
+          *-results.json
+          *-results.sarif
+          security-report.md
+        retention-days: 30
