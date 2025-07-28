@@ -1,0 +1,644 @@
+openapi: 3.0.3
+info:
+  title: Alloy Dynamic Processors API
+  description: |
+    Comprehensive API documentation for Grafana Alloy Dynamic Processors with AI-driven intelligent sorting capabilities.
+    
+    This API provides:
+    - **AI Sorter Service**: Intelligent classification and routing of telemetry data
+    - **Alloy Management**: Health checks, metrics, and OTLP data ingestion
+    - **Enterprise Integration**: Authentication and monitoring endpoints
+    
+    ## Authentication
+    
+    The AI Sorter service requires a Grok API key for AI-powered classification. Management endpoints support:
+    - Bearer token authentication for administrative operations
+    - Basic authentication for Grafana Cloud integration
+    - Service-to-service authentication via Kubernetes ServiceAccount tokens
+    
+    ## Rate Limiting
+    
+    API endpoints are subject to rate limiting:
+    - AI Sorter: 100 requests/minute per client
+    - OTLP Ingestion: 10,000 requests/minute per client
+    - Management: 1,000 requests/minute per client
+    
+    ## Error Handling
+    
+    All endpoints return structured error responses with appropriate HTTP status codes and detailed error messages.
+  version: "1.7.0"
+  contact:
+    name: Alloy Dynamic Processors Support
+    url: https://github.com/ChaosKyle/alloy-dynamic-processors
+    email: support@example.com
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
+
+servers:
+  - url: http://localhost:8000
+    description: AI Sorter Service (Development)
+  - url: http://localhost:12345
+    description: Alloy Management API (Development)
+  - url: http://localhost:4318
+    description: OTLP HTTP Receiver (Development)
+  - url: https://alloy.production.example.com
+    description: Production Environment
+  - url: https://alloy-ai-sorter.production.example.com
+    description: Production AI Sorter Service
+
+security:
+  - ApiKeyAuth: []
+  - BearerAuth: []
+  - BasicAuth: []
+
+paths:
+  # AI Sorter Endpoints
+  /health:
+    get:
+      tags:
+        - AI Sorter
+      summary: Health Check
+      description: Check the health status of the AI Sorter service
+      operationId: getAiSorterHealth
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              examples:
+                healthy:
+                  summary: Healthy service
+                  value:
+                    status: "healthy"
+                    service: "ai-sorter"
+                    timestamp: "2024-01-24T10:00:00Z"
+                    version: "1.7.0"
+        '503':
+          description: Service is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                unhealthy:
+                  summary: Unhealthy service
+                  value:
+                    error: "Service unavailable"
+                    details: "AI API connection failed"
+                    code: "SERVICE_UNAVAILABLE"
+
+  /sort:
+    post:
+      tags:
+        - AI Sorter
+      summary: Sort Telemetry Data
+      description: |
+        Classify and route telemetry data using AI-powered analysis.
+        
+        The service analyzes telemetry items and assigns:
+        - **Category**: critical, warning, or info
+        - **Forward Target**: alerting, storage, or archive
+        
+        Classification Logic:
+        - Critical items with errors/failures → alerting
+        - Warning items → storage
+        - Info items → archive
+      operationId: sortTelemetryData
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        description: Batch of telemetry items to classify
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchRequest'
+            examples:
+              mixed_telemetry:
+                summary: Mixed telemetry batch
+                value:
+                  items:
+                    - type: "error"
+                      content:
+                        message: "Database connection failed"
+                        severity: "high"
+                        service: "user-service"
+                    - type: "metric"
+                      content:
+                        name: "cpu_usage"
+                        value: 45.2
+                        unit: "percent"
+                    - type: "trace"
+                      content:
+                        span_name: "http_request"
+                        duration_ms: 150
+                        status: "ok"
+      responses:
+        '200':
+          description: Successfully classified telemetry data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SortedItem'
+              examples:
+                classified_items:
+                  summary: Classified telemetry items
+                  value:
+                    - item:
+                        type: "error"
+                        content:
+                          message: "Database connection failed"
+                          severity: "high"
+                          service: "user-service"
+                      category: "critical"
+                      forward_to: "alerting"
+                    - item:
+                        type: "metric"
+                        content:
+                          name: "cpu_usage"
+                          value: 45.2
+                          unit: "percent"
+                      category: "info"
+                      forward_to: "storage"
+        '400':
+          description: Invalid request data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid_request:
+                  summary: Empty items array
+                  value:
+                    error: "Validation error"
+                    details: "Items array cannot be empty"
+                    code: "INVALID_REQUEST"
+        '401':
+          description: Missing or invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missing_api_key:
+                  summary: Missing API key
+                  value:
+                    error: "Authentication required"
+                    details: "GROK_API_KEY environment variable not set"
+                    code: "MISSING_API_KEY"
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                rate_limited:
+                  summary: Rate limit exceeded
+                  value:
+                    error: "Rate limit exceeded"
+                    details: "Maximum 100 requests per minute allowed"
+                    code: "RATE_LIMIT_EXCEEDED"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                ai_api_error:
+                  summary: AI API error
+                  value:
+                    error: "Internal server error"
+                    details: "AI API returned error 503"
+                    code: "AI_API_ERROR"
+
+  # Alloy Management Endpoints
+  /-/healthy:
+    get:
+      tags:
+        - Alloy Management
+      summary: Alloy Health Check
+      description: Check if Alloy is healthy and ready to serve traffic
+      operationId: getAlloyHealth
+      responses:
+        '200':
+          description: Alloy is healthy
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "OK"
+        '503':
+          description: Alloy is unhealthy
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Service Unavailable"
+
+  /-/ready:
+    get:
+      tags:
+        - Alloy Management
+      summary: Alloy Readiness Check
+      description: Check if Alloy is ready to accept requests
+      operationId: getAlloyReadiness
+      responses:
+        '200':
+          description: Alloy is ready
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "OK"
+        '503':
+          description: Alloy is not ready
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Not Ready"
+
+  /metrics:
+    get:
+      tags:
+        - Alloy Management
+      summary: Prometheus Metrics
+      description: Retrieve Prometheus-formatted metrics from Alloy
+      operationId: getAlloyMetrics
+      responses:
+        '200':
+          description: Metrics in Prometheus format
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: |
+                  # HELP alloy_build_info Build information about Alloy
+                  # TYPE alloy_build_info gauge
+                  alloy_build_info{version="v1.0.0"} 1
+                  # HELP alloy_component_controller_running_components Number of running components
+                  # TYPE alloy_component_controller_running_components gauge
+                  alloy_component_controller_running_components 15
+
+  # OTLP Endpoints
+  /v1/traces:
+    post:
+      tags:
+        - OTLP Ingestion
+      summary: Ingest Traces
+      description: |
+        Receive OpenTelemetry traces via OTLP HTTP protocol.
+        
+        Supports both JSON and Protobuf encoding. Traces are processed through
+        the Alloy pipeline and forwarded to configured destinations.
+      operationId: ingestTraces
+      security:
+        - BearerAuth: []
+        - BasicAuth: []
+      requestBody:
+        description: OTLP traces payload
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OTLPTraces'
+          application/x-protobuf:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: Traces accepted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OTLPResponse'
+        '400':
+          description: Invalid traces data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: Payload too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/metrics:
+    post:
+      tags:
+        - OTLP Ingestion
+      summary: Ingest Metrics
+      description: |
+        Receive OpenTelemetry metrics via OTLP HTTP protocol.
+        
+        Supports both JSON and Protobuf encoding. Metrics are processed through
+        the Alloy pipeline and forwarded to configured destinations.
+      operationId: ingestMetrics
+      security:
+        - BearerAuth: []
+        - BasicAuth: []
+      requestBody:
+        description: OTLP metrics payload
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OTLPMetrics'
+          application/x-protobuf:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: Metrics accepted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OTLPResponse'
+        '400':
+          description: Invalid metrics data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/logs:
+    post:
+      tags:
+        - OTLP Ingestion
+      summary: Ingest Logs
+      description: |
+        Receive OpenTelemetry logs via OTLP HTTP protocol.
+        
+        Supports both JSON and Protobuf encoding. Logs are processed through
+        the Alloy pipeline and forwarded to configured destinations.
+      operationId: ingestLogs
+      security:
+        - BearerAuth: []
+        - BasicAuth: []
+      requestBody:
+        description: OTLP logs payload
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OTLPLogs'
+          application/x-protobuf:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: Logs accepted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OTLPResponse'
+        '400':
+          description: Invalid logs data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Grok API key for AI sorter service
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Bearer token for authenticated requests
+    BasicAuth:
+      type: http
+      scheme: basic
+      description: Basic authentication for Grafana Cloud integration
+
+  schemas:
+    # AI Sorter Schemas
+    DataItem:
+      type: object
+      required:
+        - type
+        - content
+      properties:
+        type:
+          type: string
+          description: Type of telemetry data
+          enum: [trace, metric, log, error, event]
+          example: "error"
+        content:
+          type: object
+          description: Telemetry data content (flexible structure)
+          additionalProperties: true
+          example:
+            message: "Database connection failed"
+            severity: "high"
+            service: "user-service"
+            timestamp: "2024-01-24T10:00:00Z"
+
+    BatchRequest:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          description: Array of telemetry items to classify
+          items:
+            $ref: '#/components/schemas/DataItem'
+          minItems: 1
+          maxItems: 100
+          example:
+            - type: "error"
+              content:
+                message: "Database connection failed"
+                severity: "high"
+                service: "user-service"
+            - type: "metric"
+              content:
+                name: "cpu_usage"
+                value: 45.2
+                unit: "percent"
+
+    SortedItem:
+      type: object
+      required:
+        - item
+        - category
+        - forward_to
+      properties:
+        item:
+          $ref: '#/components/schemas/DataItem'
+        category:
+          type: string
+          description: AI-assigned category
+          enum: [critical, warning, info]
+          example: "critical"
+        forward_to:
+          type: string
+          description: Target destination for routing
+          enum: [alerting, storage, archive]
+          example: "alerting"
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: AI confidence score (0-1)
+          example: 0.95
+        reasoning:
+          type: string
+          description: AI reasoning for classification
+          example: "High severity error message indicates critical issue requiring immediate attention"
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - service
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy, degraded]
+          example: "healthy"
+        service:
+          type: string
+          example: "ai-sorter"
+        timestamp:
+          type: string
+          format: date-time
+          example: "2024-01-24T10:00:00Z"
+        version:
+          type: string
+          example: "1.7.0"
+        uptime:
+          type: integer
+          description: Service uptime in seconds
+          example: 86400
+        dependencies:
+          type: object
+          description: Status of external dependencies
+          properties:
+            grok_api:
+              type: string
+              enum: [healthy, unhealthy]
+              example: "healthy"
+            database:
+              type: string
+              enum: [healthy, unhealthy]
+              example: "healthy"
+
+    # OTLP Schemas
+    OTLPTraces:
+      type: object
+      description: OpenTelemetry traces in OTLP format
+      properties:
+        resourceSpans:
+          type: array
+          items:
+            type: object
+            description: Resource span data
+
+    OTLPMetrics:
+      type: object
+      description: OpenTelemetry metrics in OTLP format
+      properties:
+        resourceMetrics:
+          type: array
+          items:
+            type: object
+            description: Resource metric data
+
+    OTLPLogs:
+      type: object
+      description: OpenTelemetry logs in OTLP format
+      properties:
+        resourceLogs:
+          type: array
+          items:
+            type: object
+            description: Resource log data
+
+    OTLPResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [success, partial_success, failed]
+          example: "success"
+        message:
+          type: string
+          example: "Data received successfully"
+        accepted_points:
+          type: integer
+          description: Number of data points accepted
+          example: 150
+        rejected_points:
+          type: integer
+          description: Number of data points rejected
+          example: 0
+
+    # Error Response Schema
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - code
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+          example: "Validation error"
+        details:
+          type: string
+          description: Detailed error information
+          example: "Items array cannot be empty"
+        code:
+          type: string
+          description: Machine-readable error code
+          enum: 
+            - INVALID_REQUEST
+            - MISSING_API_KEY
+            - AI_API_ERROR
+            - RATE_LIMIT_EXCEEDED
+            - SERVICE_UNAVAILABLE
+            - AUTHENTICATION_FAILED
+            - AUTHORIZATION_FAILED
+            - INTERNAL_ERROR
+          example: "INVALID_REQUEST"
+        timestamp:
+          type: string
+          format: date-time
+          example: "2024-01-24T10:00:00Z"
+        request_id:
+          type: string
+          format: uuid
+          description: Unique request identifier for debugging
+          example: "550e8400-e29b-41d4-a716-446655440000"
+
+tags:
+  - name: AI Sorter
+    description: AI-powered telemetry classification and routing
+  - name: Alloy Management
+    description: Grafana Alloy health and metrics endpoints
+  - name: OTLP Ingestion
+    description: OpenTelemetry Protocol data ingestion endpoints
+
+externalDocs:
+  description: Find more information about Alloy Dynamic Processors
+  url: https://github.com/ChaosKyle/alloy-dynamic-processors
