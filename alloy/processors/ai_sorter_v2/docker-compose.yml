@@ -1,0 +1,131 @@
+version: '3.8'
+
+services:
+  ai-sorter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-sorter-v2
+    ports:
+      - "8000:8000"
+    environment:
+      # AI Provider Configuration
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-3-sonnet-20240229}
+      - GROK_API_KEY=${GROK_API_KEY}
+      
+      # AI Manager Configuration
+      - AI_SELECTION_STRATEGY=${AI_SELECTION_STRATEGY:-health_weighted}
+      - AI_ENABLE_FALLBACK=${AI_ENABLE_FALLBACK:-true}
+      
+      # Service Configuration
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - AI_SORTER_HOST=0.0.0.0
+      - AI_SORTER_PORT=8000
+      
+      # Security Configuration
+      - AI_SORTER_API_KEYS=${AI_SORTER_API_KEYS}
+      
+      # Feature Flags
+      - ENABLE_DEBUG_ENDPOINTS=${ENABLE_DEBUG_ENDPOINTS:-false}
+      - ENABLE_ADMIN_ENDPOINTS=${ENABLE_ADMIN_ENDPOINTS:-false}
+      - ENABLE_TESTING_ENDPOINTS=${ENABLE_TESTING_ENDPOINTS:-false}
+    volumes:
+      - ./config:/app/config:ro
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - ai-sorter-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Optional: Redis for caching and rate limiting
+  redis:
+    image: redis:7-alpine
+    container_name: ai-sorter-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    networks:
+      - ai-sorter-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # Optional: Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ai-sorter-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    networks:
+      - ai-sorter-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+  # Optional: Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ai-sorter-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin123}
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    restart: unless-stopped
+    networks:
+      - ai-sorter-network
+    depends_on:
+      - prometheus
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+volumes:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  ai-sorter-network:
+    driver: bridge

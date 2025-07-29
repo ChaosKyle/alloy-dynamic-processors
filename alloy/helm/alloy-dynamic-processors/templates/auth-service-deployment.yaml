@@ -1,0 +1,287 @@
+{{- if .Values.enterpriseAuth.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-service
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "alloy-dynamic-processors.labels" . | nindent 4 }}
+    app.kubernetes.io/component: enterprise-auth
+spec:
+  {{- if not .Values.enterpriseAuth.autoscaling.enabled }}
+  replicas: {{ .Values.enterpriseAuth.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "alloy-dynamic-processors.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: enterprise-auth
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/auth-service-configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/auth-service-secret.yaml") . | sha256sum }}
+        {{- with .Values.enterpriseAuth.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "alloy-dynamic-processors.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: enterprise-auth
+    spec:
+      {{- with .Values.enterpriseAuth.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "alloy-dynamic-processors.serviceAccountName" . }}-auth
+      securityContext:
+        {{- toYaml .Values.enterpriseAuth.podSecurityContext | nindent 8 }}
+      
+      # Init container for database migration
+      initContainers:
+      - name: db-migrate
+        image: "{{ .Values.enterpriseAuth.image.repository }}:{{ .Values.enterpriseAuth.image.tag | default .Chart.AppVersion }}"
+        imagePullPolicy: {{ .Values.enterpriseAuth.image.pullPolicy }}
+        command:
+        - python
+        - -c
+        - |
+          import asyncio
+          from auth.audit_logger import AuditLogger
+          from config.settings import Settings
+          
+          async def migrate():
+              settings = Settings()
+              audit_logger = AuditLogger(settings.audit)
+              await audit_logger.create_tables()
+          
+          asyncio.run(migrate())
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-secret
+              key: database_url
+        - name: AUDIT_DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-secret
+              key: audit_database_url
+        resources:
+          {{- toYaml .Values.enterpriseAuth.resources | nindent 10 }}
+      
+      containers:
+      - name: auth-service
+        image: "{{ .Values.enterpriseAuth.image.repository }}:{{ .Values.enterpriseAuth.image.tag | default .Chart.AppVersion }}"
+        imagePullPolicy: {{ .Values.enterpriseAuth.image.pullPolicy }}
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        - name: metrics
+          containerPort: 8081
+          protocol: TCP
+        
+        env:
+        # Service configuration
+        - name: SERVICE_NAME
+          value: {{ include "alloy-dynamic-processors.fullname" . }}-auth-service
+        - name: SERVICE_VERSION
+          value: {{ .Chart.AppVersion | quote }}
+        - name: DEBUG
+          value: {{ .Values.enterpriseAuth.debug | quote }}
+        - name: HOST
+          value: "0.0.0.0"
+        - name: PORT
+          value: "8080"
+        
+        # Security
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-secret
+              key: secret_key
+        
+        # LDAP configuration
+        - name: LDAP_SERVER_URI
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-config
+              key: ldap_server_uri
+        - name: LDAP_BIND_DN
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-secret
+              key: ldap_bind_dn
+        - name: LDAP_BIND_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-secret
+              key: ldap_bind_password
+        - name: LDAP_USER_SEARCH_BASE
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-config
+              key: ldap_user_search_base
+        - name: LDAP_GROUP_SEARCH_BASE
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-config
+              key: ldap_group_search_base
+        - name: LDAP_USE_TLS
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-config
+              key: ldap_use_tls
+        
+        # SAML configuration
+        - name: SAML_SP_ENTITY_ID
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-config
+              key: saml_sp_entity_id
+        - name: SAML_SP_ACS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-config
+              key: saml_sp_acs_url
+        - name: SAML_SP_SLS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-config
+              key: saml_sp_sls_url
+        - name: SAML_IDP_ENTITY_ID
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-config
+              key: saml_idp_entity_id
+        - name: SAML_IDP_SSO_URL
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-config
+              key: saml_idp_sso_url
+        - name: SAML_IDP_SLS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-config
+              key: saml_idp_sls_url
+        - name: SAML_IDP_X509_CERT
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-secret
+              key: saml_idp_x509_cert
+        - name: SAML_SP_X509_CERT
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-secret
+              key: saml_sp_x509_cert
+        - name: SAML_SP_PRIVATE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-secret
+              key: saml_sp_private_key
+        
+        # JWT configuration
+        - name: JWT_ALGORITHM
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-config
+              key: jwt_algorithm
+        - name: JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-config
+              key: jwt_access_token_expire_minutes
+        - name: JWT_REFRESH_TOKEN_EXPIRE_DAYS
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-config
+              key: jwt_refresh_token_expire_days
+        - name: JWT_AUDIENCE
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-config
+              key: jwt_audience
+        - name: JWT_ISSUER
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-config
+              key: jwt_issuer
+        
+        # Database configuration
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-secret
+              key: database_url
+        - name: AUDIT_DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-secret
+              key: audit_database_url
+        
+        # Redis configuration
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "alloy-dynamic-processors.fullname" . }}-auth-secret
+              key: redis_url
+        
+        # Kubernetes settings
+        - name: KUBERNETES_NAMESPACE
+          value: {{ .Release.Namespace }}
+        - name: KUBERNETES_SERVICE_ACCOUNT
+          value: {{ include "alloy-dynamic-processors.serviceAccountName" . }}-auth
+        
+        # Health check probes
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: {{ .Values.enterpriseAuth.livenessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.enterpriseAuth.livenessProbe.periodSeconds }}
+          timeoutSeconds: {{ .Values.enterpriseAuth.livenessProbe.timeoutSeconds }}
+          failureThreshold: {{ .Values.enterpriseAuth.livenessProbe.failureThreshold }}
+        
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: {{ .Values.enterpriseAuth.readinessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.enterpriseAuth.readinessProbe.periodSeconds }}
+          timeoutSeconds: {{ .Values.enterpriseAuth.readinessProbe.timeoutSeconds }}
+          failureThreshold: {{ .Values.enterpriseAuth.readinessProbe.failureThreshold }}
+        
+        resources:
+          {{- toYaml .Values.enterpriseAuth.resources | nindent 10 }}
+        
+        securityContext:
+          {{- toYaml .Values.enterpriseAuth.securityContext | nindent 10 }}
+        
+        volumeMounts:
+        - name: audit-logs
+          mountPath: /var/log
+        {{- if .Values.enterpriseAuth.volumeMounts }}
+        {{- toYaml .Values.enterpriseAuth.volumeMounts | nindent 8 }}
+        {{- end }}
+      
+      volumes:
+      - name: audit-logs
+        emptyDir: {}
+      {{- if .Values.enterpriseAuth.volumes }}
+      {{- toYaml .Values.enterpriseAuth.volumes | nindent 6 }}
+      {{- end }}
+      
+      {{- with .Values.enterpriseAuth.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      
+      {{- with .Values.enterpriseAuth.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      
+      {{- with .Values.enterpriseAuth.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

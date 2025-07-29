@@ -607,6 +607,223 @@ multiTenant:
         alerting:
           enabled: false
 
+# Enterprise Authentication Service
+enterpriseAuth:
+  # Enable enterprise authentication service
+  enabled: false
+  
+  # Image configuration
+  image:
+    repository: ghcr.io/chaoskyle/alloy-auth-service
+    tag: "2.2.0"
+    pullPolicy: IfNotPresent
+  
+  # Deployment configuration
+  replicaCount: 2
+  
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 8080
+    targetPort: http
+    annotations: {}
+  
+  # Ingress configuration for authentication endpoints
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/rewrite-target: /
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    hosts:
+    - host: auth.example.com
+      paths:
+      - path: /
+        pathType: Prefix
+    tls:
+    - secretName: auth-service-tls
+      hosts:
+      - auth.example.com
+  
+  # Resource configuration
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+  
+  # Autoscaling configuration
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: 80
+  
+  # Security context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+      - ALL
+  
+  # Pod security context
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+  
+  # Health check configuration
+  livenessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 3
+  
+  readinessProbe:
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  
+  # LDAP configuration
+  ldap:
+    serverUri: "ldaps://ldap.company.com:636"
+    bindDn: "CN=service-account,OU=Service Accounts,DC=company,DC=com"
+    bindPassword: "service-password"  # Use secret in production
+    userSearchBase: "OU=Users,DC=company,DC=com"
+    groupSearchBase: "OU=Groups,DC=company,DC=com"
+    useTls: true
+    timeout: 30
+    
+    # Attribute mapping for user information
+    attributeMapping:
+      userId: "sAMAccountName"
+      displayName: "displayName"
+      email: "mail"
+      firstName: "givenName"
+      lastName: "sn"
+      department: "department"
+      title: "title"
+      employeeId: "employeeID"
+  
+  # SAML configuration
+  saml:
+    # Service Provider (SP) configuration
+    sp:
+      entityId: "urn:alloy:auth-service"
+      acsUrl: "https://auth.company.com/auth/saml/acs"
+      slsUrl: "https://auth.company.com/auth/saml/sls"
+      x509Cert: ""  # SP certificate
+      privateKey: ""  # SP private key
+    
+    # Identity Provider (IdP) configuration
+    idp:
+      entityId: "urn:company:idp"
+      ssoUrl: "https://idp.company.com/saml/sso"
+      slsUrl: "https://idp.company.com/saml/sls"
+      x509Cert: ""  # IdP certificate
+    
+    # Security settings
+    wantAssertionsSigned: true
+    wantNameIdEncrypted: false
+    wantAssertionsEncrypted: false
+    signMetadata: true
+    signAuthenticationRequests: true
+    
+    # Attribute mapping
+    attributeMapping:
+      userId: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name"
+      email: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"
+      displayName: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/displayname"
+      firstName: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname"
+      lastName: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname"
+      groups: "http://schemas.microsoft.com/ws/2008/06/identity/claims/groups"
+  
+  # JWT configuration
+  jwt:
+    algorithm: "HS256"  # or RS256 for asymmetric
+    accessTokenExpireMinutes: 60
+    refreshTokenExpireDays: 7
+    audience: "alloy-observability"
+    issuer: "alloy-auth-service"
+  
+  # RBAC configuration
+  rbac:
+    # Default roles are defined in the service
+    # Additional group mappings
+    groupRoleMapping:
+      "Domain Admins": ["system_admin"]
+      "Observability Admins": ["tenant_admin"]
+      "SRE Team": ["sre"]
+      "Engineering": ["developer"]
+      "Security Team": ["security_auditor"]
+      "Finance Team": ["finance_analyst"]
+      "All Users": ["viewer"]
+    
+    # Custom roles (optional)
+    customRoles: []
+    
+    # Policy rules (optional)
+    policies: []
+  
+  # Database configuration
+  database:
+    # Main authentication database
+    url: "postgresql://auth:password@postgres:5432/auth"
+    
+    # Audit database (can be same as main)
+    auditUrl: "postgresql://auth:password@postgres:5432/auth_audit"
+    
+    # Connection settings
+    poolSize: 5
+    maxOverflow: 10
+  
+  # Redis configuration for token blacklist
+  redis:
+    url: "redis://redis:6379"
+    keyPrefix: "auth:blacklist:"
+  
+  # Audit configuration
+  audit:
+    retentionDays: 90
+    logFile: "/var/log/auth-audit.log"
+    enableComplianceLogging: true
+  
+  # Pod annotations
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/metrics"
+  
+  # Node selection
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  
+  # Additional volumes and volume mounts
+  volumes: []
+  volumeMounts: []
+  
+  # Image pull secrets
+  imagePullSecrets: []
+  
+  # Debug mode
+  debug: false
+  
+  # Service monitor for Prometheus
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+
 # Test pods configuration
 tests:
   enabled: true
