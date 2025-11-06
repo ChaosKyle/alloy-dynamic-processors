@@ -1,0 +1,52 @@
+# Code Owners for alloy-dynamic-processors
+#
+# These owners will be automatically requested for review when someone opens a pull request.
+# The last matching pattern takes the most precedence.
+# More info: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything in the repo
+* @ChaosKyle
+
+# Documentation
+/docs/ @ChaosKyle
+*.md @ChaosKyle
+
+# Security and governance files
+/SECURITY.md @ChaosKyle
+/CONTRIBUTING.md @ChaosKyle
+/.github/ @ChaosKyle
+
+# Alloy configurations
+/alloy/configs/ @ChaosKyle
+/alloy/templates/ @ChaosKyle
+*.alloy @ChaosKyle
+*.river @ChaosKyle
+
+# AI Sorter sidecar
+/alloy/processors/ai_sorter/ @ChaosKyle
+**/ai_sorter.py @ChaosKyle
+
+# Helm charts and Kubernetes manifests
+/alloy/helm/ @ChaosKyle
+/charts/ @ChaosKyle
+*.yaml @ChaosKyle
+
+# CI/CD and automation
+/.github/workflows/ @ChaosKyle
+/scripts/ @ChaosKyle
+/Makefile @ChaosKyle
+
+# Container images
+**/Dockerfile* @ChaosKyle
+**/docker-compose*.yml @ChaosKyle
+**/.dockerignore @ChaosKyle
+
+# Monitoring and observability
+/monitoring/ @ChaosKyle
+/dashboards/ @ChaosKyle
+
+# gRPC and protocol definitions
+/proto/ @ChaosKyle
+/c_server/ @ChaosKyle
+/go_client/ @ChaosKyle
+*.proto @ChaosKyle
