@@ -1,0 +1,905 @@
+// Multi-Tenant Grafana Alloy Configuration
+// This configuration provides tenant isolation, resource quotas, RBAC, and cost attribution
+// for enterprise multi-tenant observability deployments
+
+logging {
+  level  = env("LOG_LEVEL")
+  format = "logfmt"
+}
+
+// =============================================================================
+// TENANT CONFIGURATION DISCOVERY
+// =============================================================================
+
+// Discover tenant configurations from ConfigMaps
+discovery.kubernetes "tenant_configs" {
+  role = "configmap"
+  
+  selectors {
+    role  = "configmap"
+    label = "app.kubernetes.io/component=tenant-config"
+  }
+  
+  // Refresh tenant configs every 30 seconds
+  refresh_interval = "30s"
+}
+
+// =============================================================================
+// MULTI-TENANT OTLP RECEIVERS
+// =============================================================================
+
+// Default tenant receiver (tenant routing based on attributes)
+otelcol.receiver.otlp "multi_tenant" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+    
+    // Enable per-tenant connection limits
+    max_recv_msg_size = 4194304  // 4MB per message
+    max_concurrent_streams = 100
+    
+    // Connection timeout per tenant
+    keepalive {
+      server_parameters {
+        time = "30s"
+        timeout = "5s"
+      }
+    }
+  }
+  
+  http {
+    endpoint = "0.0.0.0:4318"
+    
+    // HTTP-specific tenant routing headers
+    cors_allowed_origins = ["*"]
+    cors_allowed_headers = ["*"]
+  }
+  
+  output {
+    metrics = [otelcol.processor.memory_limiter.multi_tenant.input]
+    logs    = [otelcol.processor.memory_limiter.multi_tenant.input]
+    traces  = [otelcol.processor.memory_limiter.multi_tenant.input]
+  }
+}
+
+// Dedicated tenant receivers (optional for isolated tenants)
+otelcol.receiver.otlp "tenant_dedicated" {
+  grpc {
+    endpoint = "0.0.0.0:" + env("TENANT_DEDICATED_GRPC_PORT")
+  }
+  
+  http {
+    endpoint = "0.0.0.0:" + env("TENANT_DEDICATED_HTTP_PORT")
+  }
+  
+  output {
+    metrics = [otelcol.processor.attributes.tenant_isolation.input]
+    logs    = [otelcol.processor.attributes.tenant_isolation.input]
+    traces  = [otelcol.processor.attributes.tenant_isolation.input]
+  }
+}
+
+// =============================================================================
+// TENANT ISOLATION & RESOURCE MANAGEMENT
+// =============================================================================
+
+// Global memory limiter with tenant-aware quotas
+otelcol.processor.memory_limiter "multi_tenant" {
+  limit_mib      = env("TOTAL_MEMORY_LIMIT_MIB")
+  spike_limit_mib = env("TOTAL_SPIKE_LIMIT_MIB")
+  check_interval = "1s"
+  
+  output {
+    metrics = [otelcol.processor.attributes.tenant_identification.input]
+    logs    = [otelcol.processor.attributes.tenant_identification.input]
+    traces  = [otelcol.processor.attributes.tenant_identification.input]
+  }
+}
+
+// Tenant identification and enrichment
+otelcol.processor.attributes "tenant_identification" {
+  // Extract tenant ID from various sources
+  action {
+    key           = "tenant.id"
+    from_attribute = "tenant_id"
+    action        = "insert"
+  }
+  
+  action {
+    key           = "tenant.id"
+    from_attribute = "X-Tenant-ID"
+    action        = "insert"
+  }
+  
+  action {
+    key           = "tenant.id"
+    from_attribute = "kubernetes.namespace"
+    action        = "insert"
+  }
+  
+  // Default tenant assignment if none specified
+  action {
+    key    = "tenant.id"
+    value  = "default"
+    action = "insert"
+  }
+  
+  // Add tenant metadata
+  action {
+    key           = "tenant.name"
+    from_attribute = "tenant.id"
+    action        = "insert"
+  }
+  
+  action {
+    key    = "tenant.isolation_level"
+    value  = env("DEFAULT_TENANT_ISOLATION")
+    action = "insert"
+  }
+  
+  action {
+    key    = "tenant.cost_center"
+    value  = env("DEFAULT_COST_CENTER")
+    action = "insert"
+  }
+  
+  // Processing timestamp for cost attribution
+  action {
+    key    = "tenant.processing_timestamp"
+    value  = "{{.Timestamp}}"
+    action = "insert"
+  }
+  
+  output {
+    metrics = [otelcol.processor.filter.tenant_filter.input]
+    logs    = [otelcol.processor.filter.tenant_filter.input]
+    traces  = [otelcol.processor.filter.tenant_filter.input]
+  }
+}
+
+// Tenant-specific filtering and validation
+otelcol.processor.filter "tenant_filter" {
+  // Block unauthorized tenants
+  traces {
+    span {
+      span_statement = "resource.attributes[\"tenant.id\"] == nil"
+    }
+  }
+  
+  metrics {
+    metric {
+      metric_statement = "resource.attributes[\"tenant.id\"] == nil"
+    }
+  }
+  
+  logs {
+    log_record {
+      log_statement = "resource.attributes[\"tenant.id\"] == nil"
+    }
+  }
+  
+  // Apply tenant-specific data retention policies
+  traces {
+    span {
+      // Drop debug traces for basic tier tenants
+      span_statement = "resource.attributes[\"tenant.isolation_level\"] == \"basic\" and attributes[\"level\"] == \"DEBUG\""
+    }
+  }
+  
+  output {
+    metrics = [otelcol.processor.resource.tenant_enrichment.input]
+    logs    = [otelcol.processor.resource.tenant_enrichment.input]
+    traces  = [otelcol.processor.resource.tenant_enrichment.input]
+  }
+}
+
+// Tenant resource enrichment and quotas
+otelcol.processor.resource "tenant_enrichment" {
+  // Standard tenant attributes
+  attributes {
+    action = "upsert"
+    key    = "tenant.tier"
+    value  = env("TENANT_TIER")
+  }
+  
+  attributes {
+    action = "upsert"
+    key    = "tenant.region"
+    value  = env("TENANT_REGION")
+  }
+  
+  attributes {
+    action = "upsert"
+    key    = "tenant.organization"
+    value  = env("TENANT_ORGANIZATION")
+  }
+  
+  // Cost attribution attributes
+  attributes {
+    action = "upsert"
+    key    = "cost.tenant_id"
+    from_attribute = "tenant.id"
+  }
+  
+  attributes {
+    action = "upsert"
+    key    = "cost.processing_region"
+    value  = env("PROCESSING_REGION")
+  }
+  
+  attributes {
+    action = "upsert"
+    key    = "cost.instance_type"
+    value  = env("INSTANCE_TYPE")
+  }
+  
+  // RBAC and security context
+  attributes {
+    action = "upsert"
+    key    = "security.tenant_isolation"
+    value  = "enabled"
+  }
+  
+  output {
+    metrics = [otelcol.processor.routing.tenant_router.input]
+    logs    = [otelcol.processor.routing.tenant_router.input]
+    traces  = [otelcol.processor.routing.tenant_router.input]
+  }
+}
+
+// =============================================================================
+// TENANT-SPECIFIC ROUTING
+// =============================================================================
+
+// Main tenant routing processor
+otelcol.processor.routing "tenant_router" {
+  from_attribute = "tenant.id"
+  default_pipelines = ["default_tenant"]
+  
+  table = [
+    // Premium tier tenants get dedicated pipelines
+    {
+      value    = "tenant-premium-1"
+      pipelines = ["premium_tenant"]
+    },
+    {
+      value    = "tenant-premium-2"
+      pipelines = ["premium_tenant"]
+    },
+    
+    // Enterprise tenants get high-priority processing
+    {
+      value    = "tenant-enterprise-1"
+      pipelines = ["enterprise_tenant"]
+    },
+    
+    // Basic tier tenants use shared resources
+    {
+      value    = "tenant-basic-.*"
+      pipelines = ["basic_tenant"]
+    },
+    
+    // Development tenants get minimal processing
+    {
+      value    = "tenant-dev-.*"
+      pipelines = ["dev_tenant"]
+    }
+  ]
+  
+  output {
+    metrics = [
+      otelcol.processor.batch.premium_batch.input,
+      otelcol.processor.batch.enterprise_batch.input,
+      otelcol.processor.batch.basic_batch.input,
+      otelcol.processor.batch.dev_batch.input,
+      otelcol.processor.batch.default_batch.input
+    ]
+    logs = [
+      otelcol.processor.batch.premium_batch.input,
+      otelcol.processor.batch.enterprise_batch.input,
+      otelcol.processor.batch.basic_batch.input,
+      otelcol.processor.batch.dev_batch.input,
+      otelcol.processor.batch.default_batch.input
+    ]
+    traces = [
+      otelcol.processor.batch.premium_batch.input,
+      otelcol.processor.batch.enterprise_batch.input,
+      otelcol.processor.batch.basic_batch.input,
+      otelcol.processor.batch.dev_batch.input,
+      otelcol.processor.batch.default_batch.input
+    ]
+  }
+}
+
+// =============================================================================
+// TENANT-SPECIFIC BATCH PROCESSORS
+// =============================================================================
+
+// Premium tenant batch processor (low latency, high throughput)
+otelcol.processor.batch "premium_batch" {
+  send_batch_size     = 2048
+  timeout             = "5s"
+  send_batch_max_size = 4096
+  
+  // Premium tenants get priority metadata
+  metadata_keys = ["tenant.id", "tenant.tier", "cost.tenant_id"]
+  
+  output {
+    metrics = [otelcol.processor.metricstransform.premium_transform.input]
+    logs    = [otelcol.processor.transform.premium_transform.input]
+    traces  = [otelcol.processor.transform.premium_transform.input]
+  }
+}
+
+// Enterprise tenant batch processor (balanced performance)
+otelcol.processor.batch "enterprise_batch" {
+  send_batch_size     = 1024
+  timeout             = "10s"
+  send_batch_max_size = 2048
+  
+  metadata_keys = ["tenant.id", "tenant.tier", "cost.tenant_id"]
+  
+  output {
+    metrics = [otelcol.processor.metricstransform.enterprise_transform.input]
+    logs    = [otelcol.processor.transform.enterprise_transform.input]
+    traces  = [otelcol.processor.transform.enterprise_transform.input]
+  }
+}
+
+// Basic tenant batch processor (cost-optimized)
+otelcol.processor.batch "basic_batch" {
+  send_batch_size     = 512
+  timeout             = "30s"
+  send_batch_max_size = 1024
+  
+  metadata_keys = ["tenant.id", "cost.tenant_id"]
+  
+  output {
+    metrics = [otelcol.processor.metricstransform.basic_transform.input]
+    logs    = [otelcol.processor.transform.basic_transform.input]
+    traces  = [otelcol.processor.transform.basic_transform.input]
+  }
+}
+
+// Development tenant batch processor (minimal resources)
+otelcol.processor.batch "dev_batch" {
+  send_batch_size     = 100
+  timeout             = "60s"
+  send_batch_max_size = 200
+  
+  metadata_keys = ["tenant.id"]
+  
+  output {
+    metrics = [otelcol.processor.metricstransform.dev_transform.input]
+    logs    = [otelcol.processor.transform.dev_transform.input]
+    traces  = [otelcol.processor.transform.dev_transform.input]
+  }
+}
+
+// Default tenant batch processor
+otelcol.processor.batch "default_batch" {
+  send_batch_size     = 256
+  timeout             = "20s"
+  send_batch_max_size = 512
+  
+  metadata_keys = ["tenant.id", "cost.tenant_id"]
+  
+  output {
+    metrics = [otelcol.processor.metricstransform.default_transform.input]
+    logs    = [otelcol.processor.transform.default_transform.input]
+    traces  = [otelcol.processor.transform.default_transform.input]
+  }
+}
+
+// =============================================================================
+// TENANT-SPECIFIC TRANSFORMATIONS
+// =============================================================================
+
+// Premium tenant metrics transformation
+otelcol.processor.metricstransform "premium_transform" {
+  transforms {
+    include    = ".*"
+    match_type = "regexp"
+    action     = "update"
+    
+    operations {
+      action     = "add_label"
+      new_label  = "tenant_tier"
+      new_value  = "premium"
+    }
+    
+    operations {
+      action     = "add_label"
+      new_label  = "processing_priority"
+      new_value  = "high"
+    }
+    
+    operations {
+      action     = "add_label"
+      new_label  = "cost_model"
+      new_value  = "premium"
+    }
+  }
+  
+  output {
+    metrics = [otelcol.exporter.otlp.premium_export.input]
+  }
+}
+
+// Enterprise tenant metrics transformation
+otelcol.processor.metricstransform "enterprise_transform" {
+  transforms {
+    include    = ".*"
+    match_type = "regexp"
+    action     = "update"
+    
+    operations {
+      action     = "add_label"
+      new_label  = "tenant_tier"
+      new_value  = "enterprise"
+    }
+    
+    operations {
+      action     = "add_label"
+      new_label  = "processing_priority"
+      new_value  = "medium"
+    }
+    
+    operations {
+      action     = "add_label"
+      new_label  = "cost_model"
+      new_value  = "enterprise"
+    }
+  }
+  
+  output {
+    metrics = [otelcol.exporter.otlp.enterprise_export.input]
+  }
+}
+
+// Basic tenant metrics transformation
+otelcol.processor.metricstransform "basic_transform" {
+  transforms {
+    include    = ".*"
+    match_type = "regexp"
+    action     = "update"
+    
+    operations {
+      action     = "add_label"
+      new_label  = "tenant_tier"
+      new_value  = "basic"
+    }
+    
+    operations {
+      action     = "add_label"
+      new_label  = "processing_priority"
+      new_value  = "low"
+    }
+    
+    operations {
+      action     = "add_label"
+      new_label  = "cost_model"
+      new_value  = "basic"
+    }
+  }
+  
+  output {
+    metrics = [otelcol.exporter.otlp.basic_export.input]
+  }
+}
+
+// Development tenant metrics transformation
+otelcol.processor.metricstransform "dev_transform" {
+  transforms {
+    include    = ".*"
+    match_type = "regexp"
+    action     = "update"
+    
+    operations {
+      action     = "add_label"
+      new_label  = "tenant_tier"
+      new_value  = "development"
+    }
+    
+    operations {
+      action     = "add_label"
+      new_label  = "processing_priority"
+      new_value  = "minimal"
+    }
+    
+    operations {
+      action     = "add_label"
+      new_label  = "cost_model"
+      new_value  = "development"
+    }
+  }
+  
+  output {
+    metrics = [otelcol.exporter.otlp.dev_export.input]
+  }
+}
+
+// Default tenant metrics transformation
+otelcol.processor.metricstransform "default_transform" {
+  transforms {
+    include    = ".*"
+    match_type = "regexp"
+    action     = "update"
+    
+    operations {
+      action     = "add_label"
+      new_label  = "tenant_tier"
+      new_value  = "default"
+    }
+    
+    operations {
+      action     = "add_label"
+      new_label  = "processing_priority"
+      new_value  = "standard"
+    }
+    
+    operations {
+      action     = "add_label"
+      new_label  = "cost_model"
+      new_value  = "standard"
+    }
+  }
+  
+  output {
+    metrics = [otelcol.exporter.otlp.default_export.input]
+  }
+}
+
+// =============================================================================
+// TENANT-SPECIFIC TRACE TRANSFORMATIONS
+// =============================================================================
+
+// Premium tenant trace transformation
+otelcol.processor.transform "premium_transform" {
+  error_mode = "ignore"
+  
+  trace_statements {
+    statement = "set(attributes[\"tenant.tier\"], \"premium\")"
+  }
+  
+  trace_statements {
+    statement = "set(attributes[\"processing.priority\"], \"high\")"
+  }
+  
+  trace_statements {
+    statement = "set(attributes[\"cost.tier\"], \"premium\")"
+  }
+  
+  trace_statements {
+    statement = "set(attributes[\"sla.target_latency_ms\"], 100)"
+  }
+  
+  output {
+    logs   = [otelcol.exporter.loki.premium_export.input]
+    traces = [otelcol.exporter.otlp.premium_export.input]
+  }
+}
+
+// Enterprise tenant trace transformation
+otelcol.processor.transform "enterprise_transform" {
+  error_mode = "ignore"
+  
+  trace_statements {
+    statement = "set(attributes[\"tenant.tier\"], \"enterprise\")"
+  }
+  
+  trace_statements {
+    statement = "set(attributes[\"processing.priority\"], \"medium\")"
+  }
+  
+  trace_statements {
+    statement = "set(attributes[\"cost.tier\"], \"enterprise\")"
+  }
+  
+  trace_statements {
+    statement = "set(attributes[\"sla.target_latency_ms\"], 250)"
+  }
+  
+  output {
+    logs   = [otelcol.exporter.loki.enterprise_export.input]
+    traces = [otelcol.exporter.otlp.enterprise_export.input]
+  }
+}
+
+// Basic tenant trace transformation
+otelcol.processor.transform "basic_transform" {
+  error_mode = "ignore"
+  
+  trace_statements {
+    statement = "set(attributes[\"tenant.tier\"], \"basic\")"
+  }
+  
+  trace_statements {
+    statement = "set(attributes[\"processing.priority\"], \"low\")"
+  }
+  
+  trace_statements {
+    statement = "set(attributes[\"cost.tier\"], \"basic\")"
+  }
+  
+  trace_statements {
+    statement = "set(attributes[\"sla.target_latency_ms\"], 1000)"
+  }
+  
+  output {
+    logs   = [otelcol.exporter.loki.basic_export.input]
+    traces = [otelcol.exporter.otlp.basic_export.input]
+  }
+}
+
+// Development tenant trace transformation
+otelcol.processor.transform "dev_transform" {
+  error_mode = "ignore"
+  
+  trace_statements {
+    statement = "set(attributes[\"tenant.tier\"], \"development\")"
+  }
+  
+  trace_statements {
+    statement = "set(attributes[\"processing.priority\"], \"minimal\")"
+  }
+  
+  trace_statements {
+    statement = "set(attributes[\"cost.tier\"], \"development\")"
+  }
+  
+  trace_statements {
+    statement = "set(attributes[\"sla.target_latency_ms\"], 5000)"
+  }
+  
+  output {
+    logs   = [otelcol.exporter.loki.dev_export.input]
+    traces = [otelcol.exporter.otlp.dev_export.input]
+  }
+}
+
+// Default tenant trace transformation
+otelcol.processor.transform "default_transform" {
+  error_mode = "ignore"
+  
+  trace_statements {
+    statement = "set(attributes[\"tenant.tier\"], \"default\")"
+  }
+  
+  trace_statements {
+    statement = "set(attributes[\"processing.priority\"], \"standard\")"
+  }
+  
+  trace_statements {
+    statement = "set(attributes[\"cost.tier\"], \"standard\")"
+  }
+  
+  trace_statements {
+    statement = "set(attributes[\"sla.target_latency_ms\"], 500)"
+  }
+  
+  output {
+    logs   = [otelcol.exporter.loki.default_export.input]
+    traces = [otelcol.exporter.otlp.default_export.input]
+  }
+}
+
+// =============================================================================
+// TENANT-SPECIFIC EXPORTERS
+// =============================================================================
+
+// Premium tenant exporters (dedicated high-performance endpoints)
+otelcol.exporter.otlp "premium_export" {
+  client {
+    endpoint = env("GRAFANA_CLOUD_PREMIUM_TEMPO_URL")
+    auth_extension = otelcol.auth.basic.premium_auth.handler
+    
+    tls {
+      insecure = false
+    }
+    
+    // High-performance settings for premium tenants
+    sending_queue {
+      enabled      = true
+      num_consumers = 8
+      queue_size   = 500
+    }
+    
+    retry_on_failure {
+      enabled          = true
+      initial_interval = "1s"
+      max_interval     = "5s"
+      max_elapsed_time = "60s"
+    }
+  }
+}
+
+otelcol.exporter.loki "premium_export" {
+  endpoint = env("GRAFANA_CLOUD_PREMIUM_LOKI_URL")
+  auth_extension = otelcol.auth.basic.premium_auth.handler
+  
+  tls {
+    insecure = false
+  }
+}
+
+// Enterprise tenant exporters
+otelcol.exporter.otlp "enterprise_export" {
+  client {
+    endpoint = env("GRAFANA_CLOUD_ENTERPRISE_TEMPO_URL")
+    auth_extension = otelcol.auth.basic.enterprise_auth.handler
+    
+    tls {
+      insecure = false
+    }
+    
+    sending_queue {
+      enabled      = true
+      num_consumers = 4
+      queue_size   = 300
+    }
+  }
+}
+
+otelcol.exporter.loki "enterprise_export" {
+  endpoint = env("GRAFANA_CLOUD_ENTERPRISE_LOKI_URL")
+  auth_extension = otelcol.auth.basic.enterprise_auth.handler
+  
+  tls {
+    insecure = false
+  }
+}
+
+// Basic tenant exporters (shared endpoints)
+otelcol.exporter.otlp "basic_export" {
+  client {
+    endpoint = env("GRAFANA_CLOUD_BASIC_TEMPO_URL")
+    auth_extension = otelcol.auth.basic.basic_auth.handler
+    
+    tls {
+      insecure = false
+    }
+    
+    sending_queue {
+      enabled      = true
+      num_consumers = 2
+      queue_size   = 100
+    }
+  }
+}
+
+otelcol.exporter.loki "basic_export" {
+  endpoint = env("GRAFANA_CLOUD_BASIC_LOKI_URL")
+  auth_extension = otelcol.auth.basic.basic_auth.handler
+}
+
+// Development tenant exporters (minimal resources)
+otelcol.exporter.otlp "dev_export" {
+  client {
+    endpoint = env("GRAFANA_CLOUD_DEV_TEMPO_URL")
+    auth_extension = otelcol.auth.basic.dev_auth.handler
+    
+    sending_queue {
+      enabled      = true
+      num_consumers = 1
+      queue_size   = 50
+    }
+  }
+}
+
+otelcol.exporter.loki "dev_export" {
+  endpoint = env("GRAFANA_CLOUD_DEV_LOKI_URL")
+  auth_extension = otelcol.auth.basic.dev_auth.handler
+}
+
+// Default tenant exporters
+otelcol.exporter.otlp "default_export" {
+  client {
+    endpoint = env("GRAFANA_CLOUD_DEFAULT_TEMPO_URL")
+    auth_extension = otelcol.auth.basic.default_auth.handler
+    
+    sending_queue {
+      enabled      = true
+      num_consumers = 2
+      queue_size   = 150
+    }
+  }
+}
+
+otelcol.exporter.loki "default_export" {
+  endpoint = env("GRAFANA_CLOUD_DEFAULT_LOKI_URL")
+  auth_extension = otelcol.auth.basic.default_auth.handler
+}
+
+// =============================================================================
+// TENANT-SPECIFIC AUTHENTICATION
+// =============================================================================
+
+// Premium tenant authentication
+otelcol.auth.basic "premium_auth" {
+  username = env("GRAFANA_CLOUD_PREMIUM_INSTANCE_ID")
+  password = env("GRAFANA_CLOUD_PREMIUM_API_KEY")
+}
+
+// Enterprise tenant authentication
+otelcol.auth.basic "enterprise_auth" {
+  username = env("GRAFANA_CLOUD_ENTERPRISE_INSTANCE_ID")
+  password = env("GRAFANA_CLOUD_ENTERPRISE_API_KEY")
+}
+
+// Basic tenant authentication
+otelcol.auth.basic "basic_auth" {
+  username = env("GRAFANA_CLOUD_BASIC_INSTANCE_ID")
+  password = env("GRAFANA_CLOUD_BASIC_API_KEY")
+}
+
+// Development tenant authentication
+otelcol.auth.basic "dev_auth" {
+  username = env("GRAFANA_CLOUD_DEV_INSTANCE_ID")
+  password = env("GRAFANA_CLOUD_DEV_API_KEY")
+}
+
+// Default tenant authentication
+otelcol.auth.basic "default_auth" {
+  username = env("GRAFANA_CLOUD_DEFAULT_INSTANCE_ID")
+  password = env("GRAFANA_CLOUD_DEFAULT_API_KEY")
+}
+
+// =============================================================================
+// TENANT ISOLATION & RBAC ATTRIBUTES
+// =============================================================================
+
+// Tenant isolation processor for dedicated receivers
+otelcol.processor.attributes "tenant_isolation" {
+  // Force tenant ID from dedicated receiver context
+  action {
+    key    = "tenant.id"
+    value  = env("DEDICATED_TENANT_ID")
+    action = "upsert"
+  }
+  
+  action {
+    key    = "tenant.isolation_mode"
+    value  = "dedicated"
+    action = "insert"
+  }
+  
+  action {
+    key    = "tenant.rbac_enabled"
+    value  = "true"
+    action = "insert"
+  }
+  
+  output {
+    metrics = [otelcol.processor.attributes.tenant_identification.input]
+    logs    = [otelcol.processor.attributes.tenant_identification.input]
+    traces  = [otelcol.processor.attributes.tenant_identification.input]
+  }
+}
+
+// =============================================================================
+// MONITORING & HEALTH CHECKS
+// =============================================================================
+
+// Health check extension
+otelcol.extension.health_check "multi_tenant" {
+  endpoint = "0.0.0.0:13133"
+  
+  check_collector_pipeline {
+    enabled = true
+    interval = "5m"
+    exporter_failure_threshold = 5
+  }
+}
+
+// Performance profiling
+otelcol.extension.pprof "multi_tenant" {
+  endpoint = "0.0.0.0:1777"
+  
+  block_profile_fraction = 0
+  mutex_profile_fraction = 0
+}
+
+// Zpages for debugging
+otelcol.extension.zpages "multi_tenant" {
+  endpoint = "0.0.0.0:55679"
+}

@@ -1,0 +1,307 @@
+{{- if .Values.multiTenant.enabled }}
+{{- if .Values.multiTenant.rbac.enabled }}
+
+# Cluster-level RBAC for multi-tenant operations
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "alloy-dynamic-processors.fullname" . }}-multi-tenant
+  labels:
+    {{- include "alloy-dynamic-processors.labels" . | nindent 4 }}
+    app.kubernetes.io/component: multi-tenant-rbac
+rules:
+# Tenant configuration discovery
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+  resourceNames:
+    {{- range $tenant := .Values.multiTenant.tenants }}
+    - {{ include "alloy-dynamic-processors.fullname" $ }}-tenant-{{ $tenant.id }}
+    {{- end }}
+
+# Tenant-specific secrets access
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch"]
+  resourceNames:
+    {{- range $tenant := .Values.multiTenant.tenants }}
+    {{- if $tenant.auth.secretName }}
+    - {{ $tenant.auth.secretName }}
+    {{- end }}
+    {{- end }}
+
+# Tenant namespace access (if namespace isolation is enabled)
+{{- if .Values.multiTenant.namespaceIsolation.enabled }}
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get", "list", "watch"]
+  resourceNames:
+    {{- range $tenant := .Values.multiTenant.tenants }}
+    {{- if $tenant.namespace }}
+    - {{ $tenant.namespace }}
+    {{- end }}
+    {{- end }}
+{{- end }}
+
+# Pod and service discovery for tenant workloads
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+
+# ServiceMonitor access for tenant-specific monitoring
+- apiGroups: ["monitoring.coreos.com"]
+  resources: ["servicemonitors"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "alloy-dynamic-processors.fullname" . }}-multi-tenant
+  labels:
+    {{- include "alloy-dynamic-processors.labels" . | nindent 4 }}
+    app.kubernetes.io/component: multi-tenant-rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "alloy-dynamic-processors.fullname" . }}-multi-tenant
+subjects:
+- kind: ServiceAccount
+  name: {{ include "alloy-dynamic-processors.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+
+{{- range $tenant := .Values.multiTenant.tenants }}
+{{- if $tenant.rbac.enabled }}
+
+# Tenant-specific Role for {{ $tenant.id }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "alloy-dynamic-processors.fullname" $ }}-tenant-{{ $tenant.id }}
+  namespace: {{ $tenant.namespace | default $.Release.Namespace }}
+  labels:
+    {{- include "alloy-dynamic-processors.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: tenant-rbac
+    tenant.id: {{ $tenant.id | quote }}
+    tenant.tier: {{ $tenant.tier | quote }}
+rules:
+# Tenant-specific ConfigMap access
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+  resourceNames:
+    - {{ include "alloy-dynamic-processors.fullname" $ }}-tenant-{{ $tenant.id }}
+
+# Tenant-specific Secret access
+{{- if $tenant.auth.secretName }}
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch"]
+  resourceNames:
+    - {{ $tenant.auth.secretName }}
+{{- end }}
+
+# Tenant workload discovery (limited to tenant namespace)
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+  {{- if $tenant.rbac.resourceFilters.labelSelector }}
+  resourceNames: []
+  # Note: Kubernetes RBAC doesn't support label selectors in Role rules
+  # This would need to be enforced at the application level
+  {{- end }}
+
+# Tenant-specific monitoring resources
+- apiGroups: ["monitoring.coreos.com"]
+  resources: ["servicemonitors", "podmonitors"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+  {{- if $tenant.rbac.allowedResources }}
+  resourceNames:
+    {{- toYaml $tenant.rbac.allowedResources | nindent 4 }}
+  {{- end }}
+
+{{- if $tenant.rbac.customRules }}
+# Custom tenant-specific rules
+{{- toYaml $tenant.rbac.customRules | nindent 0 }}
+{{- end }}
+
+{{- if $tenant.rbac.serviceAccounts }}
+{{- range $sa := $tenant.rbac.serviceAccounts }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "alloy-dynamic-processors.fullname" $ }}-tenant-{{ $tenant.id }}-{{ $sa.name }}
+  namespace: {{ $tenant.namespace | default $.Release.Namespace }}
+  labels:
+    {{- include "alloy-dynamic-processors.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: tenant-rbac
+    tenant.id: {{ $tenant.id | quote }}
+    tenant.tier: {{ $tenant.tier | quote }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "alloy-dynamic-processors.fullname" $ }}-tenant-{{ $tenant.id }}
+subjects:
+- kind: ServiceAccount
+  name: {{ $sa.name }}
+  namespace: {{ $sa.namespace | default $tenant.namespace | default $.Release.Namespace }}
+{{- end }}
+{{- end }}
+
+{{- if $tenant.rbac.users }}
+{{- range $user := $tenant.rbac.users }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "alloy-dynamic-processors.fullname" $ }}-tenant-{{ $tenant.id }}-user-{{ $user.name | replace "@" "-" | replace "." "-" }}
+  namespace: {{ $tenant.namespace | default $.Release.Namespace }}
+  labels:
+    {{- include "alloy-dynamic-processors.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: tenant-rbac
+    tenant.id: {{ $tenant.id | quote }}
+    tenant.tier: {{ $tenant.tier | quote }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "alloy-dynamic-processors.fullname" $ }}-tenant-{{ $tenant.id }}
+subjects:
+- kind: User
+  name: {{ $user.name }}
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
+{{- end }}
+
+{{- if $tenant.rbac.groups }}
+{{- range $group := $tenant.rbac.groups }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "alloy-dynamic-processors.fullname" $ }}-tenant-{{ $tenant.id }}-group-{{ $group.name | replace "/" "-" | replace ":" "-" }}
+  namespace: {{ $tenant.namespace | default $.Release.Namespace }}
+  labels:
+    {{- include "alloy-dynamic-processors.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: tenant-rbac
+    tenant.id: {{ $tenant.id | quote }}
+    tenant.tier: {{ $tenant.tier | quote }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "alloy-dynamic-processors.fullname" $ }}-tenant-{{ $tenant.id }}
+subjects:
+- kind: Group
+  name: {{ $group.name }}
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
+{{- end }}
+
+{{- end }}
+{{- end }}
+
+# Network Policies for tenant isolation (if enabled)
+{{- if .Values.multiTenant.networkIsolation.enabled }}
+{{- range $tenant := .Values.multiTenant.tenants }}
+{{- if $tenant.networkIsolation.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "alloy-dynamic-processors.fullname" $ }}-tenant-{{ $tenant.id }}-isolation
+  namespace: {{ $tenant.namespace | default $.Release.Namespace }}
+  labels:
+    {{- include "alloy-dynamic-processors.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: tenant-network-policy
+    tenant.id: {{ $tenant.id | quote }}
+    tenant.tier: {{ $tenant.tier | quote }}
+spec:
+  podSelector:
+    matchLabels:
+      tenant.id: {{ $tenant.id | quote }}
+  
+  policyTypes:
+  - Ingress
+  - Egress
+  
+  ingress:
+  # Allow ingress from Alloy processors
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: {{ include "alloy-dynamic-processors.name" $ }}
+    ports:
+    - protocol: TCP
+      port: 4317  # OTLP gRPC
+    - protocol: TCP
+      port: 4318  # OTLP HTTP
+  
+  {{- if $tenant.networkIsolation.allowedIngress }}
+  # Custom ingress rules for tenant
+  {{- range $rule := $tenant.networkIsolation.allowedIngress }}
+  - from:
+    {{- if $rule.podSelector }}
+    - podSelector:
+        {{- toYaml $rule.podSelector | nindent 8 }}
+    {{- end }}
+    {{- if $rule.namespaceSelector }}
+    - namespaceSelector:
+        {{- toYaml $rule.namespaceSelector | nindent 8 }}
+    {{- end }}
+    {{- if $rule.ipBlock }}
+    - ipBlock:
+        {{- toYaml $rule.ipBlock | nindent 8 }}
+    {{- end }}
+    {{- if $rule.ports }}
+    ports:
+    {{- toYaml $rule.ports | nindent 4 }}
+    {{- end }}
+  {{- end }}
+  {{- end }}
+  
+  egress:
+  # Allow egress to DNS
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+  
+  # Allow egress to Grafana Cloud endpoints
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 80
+  
+  {{- if $tenant.networkIsolation.allowedEgress }}
+  # Custom egress rules for tenant
+  {{- range $rule := $tenant.networkIsolation.allowedEgress }}
+  - to:
+    {{- if $rule.podSelector }}
+    - podSelector:
+        {{- toYaml $rule.podSelector | nindent 8 }}
+    {{- end }}
+    {{- if $rule.namespaceSelector }}
+    - namespaceSelector:
+        {{- toYaml $rule.namespaceSelector | nindent 8 }}
+    {{- end }}
+    {{- if $rule.ipBlock }}
+    - ipBlock:
+        {{- toYaml $rule.ipBlock | nindent 8 }}
+    {{- end }}
+    {{- if $rule.ports }}
+    ports:
+    {{- toYaml $rule.ports | nindent 4 }}
+    {{- end }}
+  {{- end }}
+  {{- end }}
+
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- end }}
+{{- end }}

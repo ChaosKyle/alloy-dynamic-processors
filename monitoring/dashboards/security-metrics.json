@@ -1,0 +1,653 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Alloy Dynamic Processors - Security Metrics",
+    "tags": ["alloy", "security", "compliance", "enterprise"],
+    "style": "dark",
+    "timezone": "browser",
+    "editable": true,
+    "graphTooltip": 1,
+    "time": {
+      "from": "now-24h",
+      "to": "now"
+    },
+    "timepicker": {
+      "refresh_intervals": [
+        "30s",
+        "1m",
+        "5m",
+        "15m",
+        "30m",
+        "1h"
+      ]
+    },
+    "refresh": "1m",
+    "version": 4,
+    "panels": [
+      {
+        "id": 1,
+        "title": "Security Status Overview",
+        "type": "stat",
+        "gridPos": {
+          "h": 4,
+          "w": 24,
+          "x": 0,
+          "y": 0
+        },
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total{status=~\"4..\"}[5m]))",
+            "legendFormat": "4xx Errors/sec",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(rate(http_requests_total{status=\"401\"}[5m]))",
+            "legendFormat": "Auth Failures/sec",
+            "refId": "B"
+          },
+          {
+            "expr": "sum(rate(http_requests_total{status=\"403\"}[5m]))",
+            "legendFormat": "Auth Denied/sec",
+            "refId": "C"
+          },
+          {
+            "expr": "sum(increase(kube_pod_container_status_restarts_total[1h]))",
+            "legendFormat": "Pod Restarts (1h)",
+            "refId": "D"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "yellow",
+                  "value": 1
+                },
+                {
+                  "color": "red",
+                  "value": 10
+                }
+              ]
+            }
+          }
+        },
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          },
+          "orientation": "auto",
+          "textMode": "auto",
+          "colorMode": "background",
+          "graphMode": "area",
+          "justifyMode": "center"
+        }
+      },
+      {
+        "id": 2,
+        "title": "Authentication and Authorization Events",
+        "type": "graph",
+        "gridPos": {
+          "h": 9,
+          "w": 12,
+          "x": 0,
+          "y": 4
+        },
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total{status=\"401\"}[5m])) by (job)",
+            "legendFormat": "{{job}} - Unauthorized (401)",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(rate(http_requests_total{status=\"403\"}[5m])) by (job)",
+            "legendFormat": "{{job}} - Forbidden (403)",
+            "refId": "B"
+          },
+          {
+            "expr": "sum(rate(ai_sorter_api_key_validation_failures_total[5m]))",
+            "legendFormat": "AI Sorter - API Key Failures",
+            "refId": "C"
+          },
+          {
+            "expr": "sum(rate(authentication_attempts_total{result=\"success\"}[5m]))",
+            "legendFormat": "Successful Authentications",
+            "refId": "D"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Events/sec",
+            "min": 0
+          },
+          {
+            "show": false
+          }
+        ],
+        "legend": {
+          "show": true,
+          "values": true,
+          "current": true,
+          "max": true,
+          "alignAsTable": true,
+          "rightSide": false
+        },
+        "thresholds": [
+          {
+            "value": 5,
+            "colorMode": "critical",
+            "op": "gt"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Security Alert Trends",
+        "type": "graph",
+        "gridPos": {
+          "h": 9,
+          "w": 12,
+          "x": 12,
+          "y": 4
+        },
+        "targets": [
+          {
+            "expr": "sum(ALERTS{severity=\"critical\", alertstate=\"firing\"}) by (alertname)",
+            "legendFormat": "Critical - {{alertname}}",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(ALERTS{severity=\"warning\", alertstate=\"firing\"}) by (alertname)",
+            "legendFormat": "Warning - {{alertname}}",
+            "refId": "B"
+          },
+          {
+            "expr": "sum(rate(security_scan_findings_total{severity=\"high\"}[1h]))",
+            "legendFormat": "High Severity Findings",
+            "refId": "C"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Active Alerts",
+            "min": 0
+          },
+          {
+            "show": false
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "API Security Metrics",
+        "type": "graph",
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 13
+        },
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total[5m])) by (status)",
+            "legendFormat": "{{status}} responses",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(rate(http_request_size_bytes_sum[5m])) / sum(rate(http_request_size_bytes_count[5m]))",
+            "legendFormat": "Avg Request Size",
+            "refId": "B"
+          },
+          {
+            "expr": "sum(rate(ddos_protection_blocked_requests_total[5m]))",
+            "legendFormat": "DDoS Blocked Requests",
+            "refId": "C"
+          },
+          {
+            "expr": "sum(rate(rate_limit_exceeded_total[5m])) by (service)",
+            "legendFormat": "{{service}} - Rate Limited",
+            "refId": "D"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Requests/sec",
+            "min": 0
+          },
+          {
+            "show": false
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Container Security Posture",
+        "type": "graph",
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 13
+        },
+        "targets": [
+          {
+            "expr": "sum(kube_pod_container_status_running{container!=\"POD\"}) by (container)",
+            "legendFormat": "{{container}} - Running",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(kube_pod_security_context_run_as_non_root) by (pod)",
+            "legendFormat": "Non-root Containers",
+            "refId": "B"
+          },
+          {
+            "expr": "sum(kube_pod_security_context_read_only_root_filesystem) by (pod)",
+            "legendFormat": "Read-only Root FS",
+            "refId": "C"
+          },
+          {
+            "expr": "count(kube_pod_info{created_by_kind!=\"Job\"}) - count(kube_pod_container_status_running)",
+            "legendFormat": "Non-running Pods",
+            "refId": "D"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Count",
+            "min": 0
+          },
+          {
+            "show": false
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Network Security Events",
+        "type": "graph",
+        "gridPos": {
+          "h": 8,
+          "w": 24,
+          "x": 0,
+          "y": 21
+        },
+        "targets": [
+          {
+            "expr": "sum(rate(network_policy_dropped_packets_total[5m])) by (direction)",
+            "legendFormat": "{{direction}} - Dropped Packets",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(rate(tls_handshake_failures_total[5m]))",
+            "legendFormat": "TLS Handshake Failures",
+            "refId": "B"
+          },
+          {
+            "expr": "sum(rate(cert_expiry_warnings_total[5m]))",
+            "legendFormat": "Certificate Expiry Warnings",
+            "refId": "C"
+          },
+          {
+            "expr": "sum(rate(suspicious_traffic_blocked_total[5m])) by (source_ip)",
+            "legendFormat": "{{source_ip}} - Blocked",
+            "refId": "D"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Events/sec",
+            "min": 0
+          },
+          {
+            "show": false
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Vulnerability Scan Results",
+        "type": "table",
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 29
+        },
+        "targets": [
+          {
+            "expr": "security_scan_findings{severity=~\"high|critical\"}",
+            "refId": "A",
+            "format": "table",
+            "instant": true
+          }
+        ],
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {
+                "__name__": true,
+                "job": true,
+                "instance": true
+              },
+              "indexByName": {},
+              "renameByName": {
+                "image": "Container Image",
+                "severity": "Severity",
+                "cve_id": "CVE ID",
+                "description": "Description",
+                "fixed_version": "Fixed Version"
+              }
+            }
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "align": "left",
+              "displayMode": "auto"
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Severity"
+              },
+              "properties": [
+                {
+                  "id": "custom.displayMode",
+                  "value": "color-background"
+                },
+                {
+                  "id": "thresholds",
+                  "value": {
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": null
+                      },
+                      {
+                        "color": "yellow",
+                        "value": 1
+                      },
+                      {
+                        "color": "red",
+                        "value": 2
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": 8,
+        "title": "Compliance Status",
+        "type": "stat",
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 29
+        },
+        "targets": [
+          {
+            "expr": "sum(compliance_check_passed{standard=\"SOC2\"}) / sum(compliance_check_total{standard=\"SOC2\"}) * 100",
+            "legendFormat": "SOC 2 Compliance %",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(compliance_check_passed{standard=\"GDPR\"}) / sum(compliance_check_total{standard=\"GDPR\"}) * 100",
+            "legendFormat": "GDPR Compliance %",
+            "refId": "B"
+          },
+          {
+            "expr": "sum(compliance_check_passed{standard=\"HIPAA\"}) / sum(compliance_check_total{standard=\"HIPAA\"}) * 100",
+            "legendFormat": "HIPAA Compliance %",
+            "refId": "C"
+          },
+          {
+            "expr": "sum(security_policy_violations_total{resolved=\"false\"})",
+            "legendFormat": "Open Violations",
+            "refId": "D"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "red",
+                  "value": null
+                },
+                {
+                  "color": "yellow",
+                  "value": 80
+                },
+                {
+                  "color": "green",
+                  "value": 95
+                }
+              ]
+            },
+            "unit": "percent"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Open Violations"
+              },
+              "properties": [
+                {
+                  "id": "unit",
+                  "value": "short"
+                },
+                {
+                  "id": "thresholds",
+                  "value": {
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": null
+                      },
+                      {
+                        "color": "yellow",
+                        "value": 1
+                      },
+                      {
+                        "color": "red",
+                        "value": 5
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          },
+          "orientation": "auto",
+          "textMode": "auto",
+          "colorMode": "background",
+          "graphMode": "none",
+          "justifyMode": "center"
+        }
+      },
+      {
+        "id": 9,
+        "title": "Audit Log Analysis",
+        "type": "logs",
+        "gridPos": {
+          "h": 10,
+          "w": 24,
+          "x": 0,
+          "y": 37
+        },
+        "targets": [
+          {
+            "expr": "{job=\"audit-logs\"} |= \"SECURITY\" | json | severity >= \"WARN\"",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "showTime": true,
+          "showLabels": true,
+          "showCommonLabels": false,
+          "wrapLogMessage": true,
+          "sortOrder": "Descending"
+        }
+      },
+      {
+        "id": 10,
+        "title": "Security Incident Timeline",
+        "type": "graph",
+        "gridPos": {
+          "h": 8,
+          "w": 24,
+          "x": 0,
+          "y": 47
+        },
+        "targets": [
+          {
+            "expr": "sum(increase(security_incidents_total[1h])) by (type)",
+            "legendFormat": "{{type}} incidents",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(increase(security_incidents_resolved_total[1h]))",
+            "legendFormat": "Incidents resolved",
+            "refId": "B"
+          },
+          {
+            "expr": "sum(security_incidents_total) - sum(security_incidents_resolved_total)",
+            "legendFormat": "Open incidents",
+            "refId": "C"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Incident Count",
+            "min": 0
+          },
+          {
+            "show": false
+          }
+        ]
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "current": {
+            "selected": false,
+            "text": "All",
+            "value": "$__all"
+          },
+          "hide": 0,
+          "includeAll": true,
+          "label": "Service",
+          "multi": true,
+          "name": "service",
+          "options": [],
+          "query": "label_values(http_requests_total, job)",
+          "refresh": 1,
+          "regex": "",
+          "skipUrlSync": false,
+          "sort": 1,
+          "type": "query"
+        },
+        {
+          "current": {
+            "selected": false,
+            "text": "All",
+            "value": "$__all"
+          },
+          "hide": 0,
+          "includeAll": true,
+          "label": "Severity",
+          "multi": true,
+          "name": "severity",
+          "options": [
+            {
+              "selected": true,
+              "text": "All",
+              "value": "$__all"
+            },
+            {
+              "selected": false,
+              "text": "critical",
+              "value": "critical"
+            },
+            {
+              "selected": false,
+              "text": "warning",
+              "value": "warning"
+            },
+            {
+              "selected": false,
+              "text": "info",
+              "value": "info"
+            }
+          ],
+          "query": "critical,warning,info",
+          "skipUrlSync": false,
+          "type": "custom"
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "builtIn": 1,
+          "datasource": "-- Grafana --",
+          "enable": true,
+          "hide": true,
+          "iconColor": "rgba(0, 211, 255, 1)",
+          "name": "Annotations & Alerts",
+          "type": "dashboard"
+        },
+        {
+          "datasource": "prometheus",
+          "enable": true,
+          "expr": "ALERTS{severity=\"critical\", alertstate=\"firing\"}",
+          "iconColor": "red",
+          "name": "Critical Security Alerts",
+          "step": "60s",
+          "textFormat": "{{alertname}}: {{summary}}",
+          "titleFormat": "Security Alert"
+        },
+        {
+          "datasource": "prometheus",
+          "enable": true,
+          "expr": "increase(security_incidents_total[1m]) > 0",
+          "iconColor": "orange",
+          "name": "Security Incidents",
+          "step": "60s",
+          "textFormat": "New {{type}} security incident",
+          "titleFormat": "Security Incident"
+        }
+      ]
+    }
+  }
+}

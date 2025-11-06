@@ -24,7 +24,7 @@ alloy:
   # Configuration selection
   config:
     # Which Alloy configuration to use
-    # Options: basic, enhanced-with-sort, production
+    # Options: basic, enhanced-with-sort, multi-tenant, production
     type: "enhanced-with-sort"
     
     # Custom configuration (overrides type if provided)
@@ -313,6 +313,299 @@ aiSorter:
   nodeSelector: {}
   tolerations: []
   affinity: {}
+
+# Multi-Tenant Configuration
+multiTenant:
+  # Enable multi-tenant support
+  enabled: false
+  
+  # Global multi-tenant settings
+  global:
+    region: "us-west-2"
+    processingRegion: "us-west-2"
+    instanceType: "standard"
+    
+    # Default resource limits (applies to all tenants unless overridden)
+    defaultQuotas:
+      memoryLimitMib: 512
+      spikeLimitMib: 128
+      maxConcurrentStreams: 50
+      batchSize: 512
+      batchTimeout: "30s"
+      retentionDays: 30
+  
+  # RBAC configuration for multi-tenant access
+  rbac:
+    enabled: true
+    
+    # Global RBAC settings
+    clusterRoleEnabled: true
+    namespaceIsolation: true
+  
+  # Network isolation between tenants
+  networkIsolation:
+    enabled: false
+    defaultPolicy: "deny-all"
+  
+  # Namespace isolation
+  namespaceIsolation:
+    enabled: false
+    namespacePrefix: "tenant-"
+  
+  # Cost attribution and billing
+  costAttribution:
+    enabled: true
+    scrapeInterval: "30s"
+    ruleInterval: "60s"
+    billingInterval: "300s"
+    
+    # Cost model parameters
+    cpuCostPerSecond: 0.0001
+    memoryCostPerByte: 0.000000001
+    networkCostPerByte: 0.0001
+    storageCostPerByte: 0.00001
+    
+    # Alert thresholds
+    highCostThreshold: 1.0
+    lowEfficiencyThreshold: 85
+    
+    # Instance and infrastructure costs
+    instanceType: "standard"
+    costModel: "consumption"
+  
+  # Tenant definitions
+  tenants:
+    # Premium tier example tenant
+    - id: "tenant-premium-1"
+      name: "Premium Customer 1"
+      tier: "premium"
+      organization: "acme-corp"
+      region: "us-west-2"
+      
+      # Premium tier quotas (high performance)
+      quotas:
+        memoryLimitMib: 2048
+        spikeLimitMib: 512
+        maxConcurrentStreams: 200
+        batchSize: 2048
+        batchTimeout: "5s"
+        retentionDays: 90
+      
+      # Cost center information
+      costCenter:
+        id: "cc-premium-001"
+        department: "engineering"
+        project: "platform-monitoring"
+        billingAccount: "premium-billing"
+      
+      # RBAC configuration
+      rbac:
+        enabled: true
+        users:
+          - name: "premium.admin@acme-corp.com"
+          - name: "premium.ops@acme-corp.com"
+        groups:
+          - name: "premium-ops-team"
+        serviceAccounts:
+          - name: "premium-workload-sa"
+            namespace: "tenant-premium-1"
+      
+      # Routing configuration
+      routing:
+        dedicatedReceiver:
+          enabled: true
+          grpcPort: 4317
+          httpPort: 4318
+        
+        exporters:
+          tempo:
+            endpoint: "https://tempo-premium.grafana.net:443"
+            auth:
+              secretName: "premium-grafana-auth"
+              usernameKey: "username"
+              passwordKey: "password"
+          loki:
+            endpoint: "https://logs-premium.grafana.net/loki/api/v1/push"
+            auth:
+              secretName: "premium-grafana-auth"
+              usernameKey: "username"
+              passwordKey: "password"
+      
+      # Data filtering
+      filtering:
+        allowedNamespaces:
+          - "tenant-premium-1"
+          - "premium-apps"
+        customRules:
+          - type: "allow"
+            pattern: "service.name=premium-*"
+      
+      # SLA targets
+      sla:
+        targetLatencyMs: 100
+        targetAvailability: 99.99
+        targetThroughputRps: 10000
+      
+      # Monitoring configuration
+      monitoring:
+        enabled: true
+        alerting:
+          enabled: true
+          webhooks:
+            - url: "https://alerts.acme-corp.com/webhook"
+              secretName: "premium-alert-webhook"
+    
+    # Enterprise tier example tenant
+    - id: "tenant-enterprise-1"
+      name: "Enterprise Customer 1"
+      tier: "enterprise"
+      organization: "enterprise-corp"
+      
+      # Enterprise tier quotas
+      quotas:
+        memoryLimitMib: 1024
+        spikeLimitMib: 256
+        maxConcurrentStreams: 100
+        batchSize: 1024
+        batchTimeout: "10s"
+        retentionDays: 60
+      
+      costCenter:
+        id: "cc-enterprise-001"
+        department: "devops"
+        project: "observability"
+        billingAccount: "enterprise-billing"
+      
+      rbac:
+        enabled: true
+        users:
+          - name: "enterprise.admin@enterprise-corp.com"
+        groups:
+          - name: "enterprise-devops"
+      
+      # Shared routing (no dedicated receiver)
+      routing:
+        exporters:
+          tempo:
+            endpoint: "https://tempo-enterprise.grafana.net:443"
+            auth:
+              secretName: "enterprise-grafana-auth"
+              usernameKey: "username"
+              passwordKey: "password"
+      
+      filtering:
+        allowedNamespaces:
+          - "tenant-enterprise-1"
+          - "enterprise-apps"
+      
+      sla:
+        targetLatencyMs: 250
+        targetAvailability: 99.9
+        targetThroughputRps: 5000
+      
+      monitoring:
+        enabled: true
+        alerting:
+          enabled: true
+    
+    # Basic tier example tenant
+    - id: "tenant-basic-1"
+      name: "Basic Customer 1"
+      tier: "basic"
+      organization: "basic-corp"
+      
+      # Basic tier quotas (cost-optimized)
+      quotas:
+        memoryLimitMib: 512
+        spikeLimitMib: 128
+        maxConcurrentStreams: 50
+        batchSize: 512
+        batchTimeout: "30s"
+        retentionDays: 30
+      
+      costCenter:
+        id: "cc-basic-001"
+        department: "operations"
+        project: "monitoring"
+        billingAccount: "basic-billing"
+      
+      rbac:
+        enabled: true
+        users:
+          - name: "basic.admin@basic-corp.com"
+      
+      # Shared endpoints for basic tier
+      routing:
+        exporters:
+          tempo:
+            endpoint: "https://tempo-basic.grafana.net:443"
+            auth:
+              secretName: "basic-grafana-auth"
+              usernameKey: "username"
+              passwordKey: "password"
+      
+      filtering:
+        allowedNamespaces:
+          - "tenant-basic-1"
+      
+      sla:
+        targetLatencyMs: 1000
+        targetAvailability: 99.5
+        targetThroughputRps: 1000
+      
+      monitoring:
+        enabled: true
+        alerting:
+          enabled: false  # Basic tier has limited alerting
+    
+    # Development tier example tenant
+    - id: "tenant-dev-1"
+      name: "Development Environment"
+      tier: "development"
+      organization: "internal"
+      
+      # Minimal quotas for development
+      quotas:
+        memoryLimitMib: 256
+        spikeLimitMib: 64
+        maxConcurrentStreams: 25
+        batchSize: 100
+        batchTimeout: "60s"
+        retentionDays: 7
+      
+      costCenter:
+        id: "cc-dev-001"
+        department: "engineering"
+        project: "development"
+        billingAccount: "internal"
+      
+      rbac:
+        enabled: false  # Development has relaxed RBAC
+      
+      routing:
+        exporters:
+          tempo:
+            endpoint: "https://tempo-dev.grafana.net:443"
+            auth:
+              secretName: "dev-grafana-auth"
+              usernameKey: "username"
+              passwordKey: "password"
+      
+      filtering:
+        allowedNamespaces:
+          - "dev"
+          - "development"
+          - "staging"
+      
+      sla:
+        targetLatencyMs: 5000
+        targetAvailability: 95.0
+        targetThroughputRps: 100
+      
+      monitoring:
+        enabled: false  # Minimal monitoring for dev
+        alerting:
+          enabled: false
 
 # Test pods configuration
 tests:

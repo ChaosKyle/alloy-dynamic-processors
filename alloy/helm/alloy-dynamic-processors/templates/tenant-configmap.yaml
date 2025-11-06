@@ -1,0 +1,177 @@
+{{- if .Values.multiTenant.enabled }}
+{{- range $tenant := .Values.multiTenant.tenants }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "alloy-dynamic-processors.fullname" $ }}-tenant-{{ $tenant.id }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "alloy-dynamic-processors.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: tenant-config
+    tenant.id: {{ $tenant.id | quote }}
+    tenant.tier: {{ $tenant.tier | quote }}
+  annotations:
+    tenant.config/version: {{ $.Chart.Version | quote }}
+    tenant.config/checksum: {{ $tenant | toJson | sha256sum }}
+data:
+  tenant-config.yaml: |
+    tenant:
+      id: {{ $tenant.id | quote }}
+      name: {{ $tenant.name | quote }}
+      tier: {{ $tenant.tier | quote }}
+      organization: {{ $tenant.organization | default "default" | quote }}
+      region: {{ $tenant.region | default $.Values.global.region | quote }}
+      
+      # Resource quotas per tenant tier
+      {{- if eq $tenant.tier "premium" }}
+      quotas:
+        memory_limit_mib: {{ $tenant.quotas.memoryLimitMib | default 2048 }}
+        spike_limit_mib: {{ $tenant.quotas.spikeLimitMib | default 512 }}
+        max_concurrent_streams: {{ $tenant.quotas.maxConcurrentStreams | default 200 }}
+        batch_size: {{ $tenant.quotas.batchSize | default 2048 }}
+        batch_timeout: {{ $tenant.quotas.batchTimeout | default "5s" }}
+        retention_days: {{ $tenant.quotas.retentionDays | default 90 }}
+      {{- else if eq $tenant.tier "enterprise" }}
+      quotas:
+        memory_limit_mib: {{ $tenant.quotas.memoryLimitMib | default 1024 }}
+        spike_limit_mib: {{ $tenant.quotas.spikeLimitMib | default 256 }}
+        max_concurrent_streams: {{ $tenant.quotas.maxConcurrentStreams | default 100 }}
+        batch_size: {{ $tenant.quotas.batchSize | default 1024 }}
+        batch_timeout: {{ $tenant.quotas.batchTimeout | default "10s" }}
+        retention_days: {{ $tenant.quotas.retentionDays | default 60 }}
+      {{- else if eq $tenant.tier "basic" }}
+      quotas:
+        memory_limit_mib: {{ $tenant.quotas.memoryLimitMib | default 512 }}
+        spike_limit_mib: {{ $tenant.quotas.spikeLimitMib | default 128 }}
+        max_concurrent_streams: {{ $tenant.quotas.maxConcurrentStreams | default 50 }}
+        batch_size: {{ $tenant.quotas.batchSize | default 512 }}
+        batch_timeout: {{ $tenant.quotas.batchTimeout | default "30s" }}
+        retention_days: {{ $tenant.quotas.retentionDays | default 30 }}
+      {{- else if eq $tenant.tier "development" }}
+      quotas:
+        memory_limit_mib: {{ $tenant.quotas.memoryLimitMib | default 256 }}
+        spike_limit_mib: {{ $tenant.quotas.spikeLimitMib | default 64 }}
+        max_concurrent_streams: {{ $tenant.quotas.maxConcurrentStreams | default 25 }}
+        batch_size: {{ $tenant.quotas.batchSize | default 100 }}
+        batch_timeout: {{ $tenant.quotas.batchTimeout | default "60s" }}
+        retention_days: {{ $tenant.quotas.retentionDays | default 7 }}
+      {{- end }}
+      
+      # RBAC configuration
+      rbac:
+        enabled: {{ $tenant.rbac.enabled | default true }}
+        {{- if $tenant.rbac.roles }}
+        roles:
+          {{- toYaml $tenant.rbac.roles | nindent 10 }}
+        {{- end }}
+        {{- if $tenant.rbac.users }}
+        users:
+          {{- toYaml $tenant.rbac.users | nindent 10 }}
+        {{- end }}
+        {{- if $tenant.rbac.groups }}
+        groups:
+          {{- toYaml $tenant.rbac.groups | nindent 10 }}
+        {{- end }}
+      
+      # Cost attribution
+      cost_center:
+        id: {{ $tenant.costCenter.id | default "default" | quote }}
+        department: {{ $tenant.costCenter.department | default "unknown" | quote }}
+        project: {{ $tenant.costCenter.project | default "unknown" | quote }}
+        billing_account: {{ $tenant.costCenter.billingAccount | default "default" | quote }}
+        cost_model: {{ $tenant.tier | quote }}
+      
+      # Routing configuration
+      routing:
+        {{- if $tenant.routing.dedicatedReceiver }}
+        dedicated_receiver:
+          enabled: true
+          grpc_port: {{ $tenant.routing.dedicatedReceiver.grpcPort | default 4317 }}
+          http_port: {{ $tenant.routing.dedicatedReceiver.httpPort | default 4318 }}
+        {{- end }}
+        
+        # Tenant-specific exporters
+        exporters:
+          {{- if $tenant.routing.exporters.tempo }}
+          tempo:
+            endpoint: {{ $tenant.routing.exporters.tempo.endpoint | quote }}
+            {{- if $tenant.routing.exporters.tempo.auth }}
+            auth:
+              {{- toYaml $tenant.routing.exporters.tempo.auth | nindent 14 }}
+            {{- end }}
+          {{- end }}
+          
+          {{- if $tenant.routing.exporters.loki }}
+          loki:
+            endpoint: {{ $tenant.routing.exporters.loki.endpoint | quote }}
+            {{- if $tenant.routing.exporters.loki.auth }}
+            auth:
+              {{- toYaml $tenant.routing.exporters.loki.auth | nindent 14 }}
+            {{- end }}
+          {{- end }}
+          
+          {{- if $tenant.routing.exporters.prometheus }}
+          prometheus:
+            endpoint: {{ $tenant.routing.exporters.prometheus.endpoint | quote }}
+            {{- if $tenant.routing.exporters.prometheus.auth }}
+            auth:
+              {{- toYaml $tenant.routing.exporters.prometheus.auth | nindent 14 }}
+            {{- end }}
+          {{- end }}
+      
+      # Data filtering and transformation rules
+      filtering:
+        {{- if $tenant.filtering.allowedNamespaces }}
+        allowed_namespaces:
+          {{- toYaml $tenant.filtering.allowedNamespaces | nindent 10 }}
+        {{- end }}
+        
+        {{- if $tenant.filtering.blockedNamespaces }}
+        blocked_namespaces:
+          {{- toYaml $tenant.filtering.blockedNamespaces | nindent 10 }}
+        {{- end }}
+        
+        {{- if $tenant.filtering.allowedServices }}
+        allowed_services:
+          {{- toYaml $tenant.filtering.allowedServices | nindent 10 }}
+        {{- end }}
+        
+        {{- if $tenant.filtering.customRules }}
+        custom_rules:
+          {{- toYaml $tenant.filtering.customRules | nindent 10 }}
+        {{- end }}
+      
+      # SLA targets
+      sla:
+        target_latency_ms: {{ $tenant.sla.targetLatencyMs | default 500 }}
+        target_availability: {{ $tenant.sla.targetAvailability | default 99.9 }}
+        target_throughput_rps: {{ $tenant.sla.targetThroughputRps | default 1000 }}
+      
+      # Monitoring and alerting
+      monitoring:
+        enabled: {{ $tenant.monitoring.enabled | default true }}
+        {{- if $tenant.monitoring.customDashboards }}
+        custom_dashboards:
+          {{- toYaml $tenant.monitoring.customDashboards | nindent 10 }}
+        {{- end }}
+        
+        {{- if $tenant.monitoring.alertRules }}
+        alert_rules:
+          {{- toYaml $tenant.monitoring.alertRules | nindent 10 }}
+        {{- end }}
+        
+        alerting:
+          enabled: {{ $tenant.monitoring.alerting.enabled | default true }}
+          {{- if $tenant.monitoring.alerting.webhooks }}
+          webhooks:
+            {{- toYaml $tenant.monitoring.alerting.webhooks | nindent 12 }}
+          {{- end }}
+          
+          {{- if $tenant.monitoring.alerting.channels }}
+          channels:
+            {{- toYaml $tenant.monitoring.alerting.channels | nindent 12 }}
+          {{- end }}
+
+{{- end }}
+{{- end }}

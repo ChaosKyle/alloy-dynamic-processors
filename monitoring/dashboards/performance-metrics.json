@@ -1,0 +1,593 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Alloy Dynamic Processors - Performance Metrics",
+    "tags": ["alloy", "performance", "metrics", "enterprise"],
+    "style": "dark",
+    "timezone": "browser",
+    "editable": true,
+    "graphTooltip": 1,
+    "time": {
+      "from": "now-6h",
+      "to": "now"
+    },
+    "timepicker": {
+      "refresh_intervals": [
+        "5s",
+        "10s",
+        "30s",
+        "1m",
+        "5m",
+        "15m",
+        "30m",
+        "1h"
+      ]
+    },
+    "refresh": "1m",
+    "version": 2,
+    "panels": [
+      {
+        "id": 1,
+        "title": "Performance SLA Status",
+        "type": "stat",
+        "gridPos": {
+          "h": 4,
+          "w": 24,
+          "x": 0,
+          "y": 0
+        },
+        "targets": [
+          {
+            "expr": "avg(histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"ai-sorter\"}[5m])) by (le))) < 2",
+            "legendFormat": "AI Sorter p95 SLA (< 2s)",
+            "refId": "A"
+          },
+          {
+            "expr": "avg(sum(rate(http_requests_total{job=\"ai-sorter\",status=~\"5..\"}[5m])) / sum(rate(http_requests_total{job=\"ai-sorter\"}[5m]))) < 0.02",
+            "legendFormat": "AI Sorter Error Rate SLA (< 2%)",
+            "refId": "B"
+          },
+          {
+            "expr": "avg(histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"alloy\"}[5m])) by (le))) < 0.5",
+            "legendFormat": "OTLP p95 SLA (< 0.5s)",
+            "refId": "C"
+          },
+          {
+            "expr": "avg(up{job=~\"ai-sorter|alloy\"}) >= 0.999",
+            "legendFormat": "Availability SLA (>= 99.9%)",
+            "refId": "D"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "red",
+                  "value": null
+                },
+                {
+                  "color": "green",
+                  "value": 1
+                }
+              ]
+            },
+            "mappings": [
+              {
+                "options": {
+                  "0": {
+                    "text": "VIOLATION"
+                  },
+                  "1": {
+                    "text": "COMPLIANT"
+                  }
+                },
+                "type": "value"
+              }
+            ]
+          }
+        },
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          },
+          "orientation": "auto",
+          "textMode": "auto",
+          "colorMode": "background",
+          "graphMode": "none",
+          "justifyMode": "center"
+        }
+      },
+      {
+        "id": 2,
+        "title": "Throughput Trends",
+        "type": "graph",
+        "gridPos": {
+          "h": 9,
+          "w": 24,
+          "x": 0,
+          "y": 4
+        },
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total{job=\"ai-sorter\"}[5m]))",
+            "legendFormat": "AI Sorter RPS",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(rate(otlp_receiver_accepted_spans_total[5m]))",
+            "legendFormat": "OTLP Spans/sec",
+            "refId": "B"
+          },
+          {
+            "expr": "sum(rate(otlp_receiver_accepted_metric_points_total[5m]))",
+            "legendFormat": "OTLP Metrics/sec",
+            "refId": "C"
+          },
+          {
+            "expr": "sum(rate(alloy_component_evaluation_duration_seconds_count[5m]))",
+            "legendFormat": "Alloy Component Evaluations/sec",
+            "refId": "D"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Requests/Operations per Second",
+            "min": 0
+          },
+          {
+            "show": false
+          }
+        ],
+        "legend": {
+          "show": true,
+          "values": true,
+          "current": true,
+          "avg": true,
+          "max": true,
+          "alignAsTable": true,
+          "rightSide": false
+        }
+      },
+      {
+        "id": 3,
+        "title": "Latency Heatmap - AI Sorter",
+        "type": "heatmap",
+        "gridPos": {
+          "h": 9,
+          "w": 12,
+          "x": 0,
+          "y": 13
+        },
+        "targets": [
+          {
+            "expr": "sum(increase(http_request_duration_seconds_bucket{job=\"ai-sorter\"}[1m])) by (le)",
+            "legendFormat": "{{le}}",
+            "refId": "A",
+            "format": "heatmap"
+          }
+        ],
+        "heatmap": {
+          "hideZeroBuckets": true,
+          "highlightCards": true,
+          "reverseYBuckets": false
+        },
+        "yAxis": {
+          "min": 0,
+          "max": 10,
+          "unit": "s",
+          "decimals": 2
+        },
+        "xAxis": {
+          "show": true
+        },
+        "color": {
+          "colorScheme": "interpolateSpectral",
+          "exponent": 0.5,
+          "min": 0,
+          "mode": "spectrum"
+        }
+      },
+      {
+        "id": 4,
+        "title": "Latency Percentiles Comparison",
+        "type": "graph",
+        "gridPos": {
+          "h": 9,
+          "w": 12,
+          "x": 12,
+          "y": 13
+        },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{job=\"ai-sorter\"}[5m])) by (le))",
+            "legendFormat": "AI Sorter p50",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.90, sum(rate(http_request_duration_seconds_bucket{job=\"ai-sorter\"}[5m])) by (le))",
+            "legendFormat": "AI Sorter p90",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"ai-sorter\"}[5m])) by (le))",
+            "legendFormat": "AI Sorter p95",
+            "refId": "C"
+          },
+          {
+            "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{job=\"ai-sorter\"}[5m])) by (le))",
+            "legendFormat": "AI Sorter p99",
+            "refId": "D"
+          },
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"alloy\"}[5m])) by (le))",
+            "legendFormat": "Alloy p95",
+            "refId": "E"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Response Time (seconds)",
+            "min": 0
+          },
+          {
+            "show": false  
+          }
+        ],
+        "thresholds": [
+          {
+            "value": 2,
+            "colorMode": "critical",
+            "op": "gt",
+            "line": true,
+            "fill": false
+          },
+          {
+            "value": 1,
+            "colorMode": "warning", 
+            "op": "gt",
+            "line": true,
+            "fill": false
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "AI Sorter Performance Deep Dive",
+        "type": "graph",
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 22
+        },
+        "targets": [
+          {
+            "expr": "rate(ai_sorter_batch_processing_duration_seconds_sum[5m]) / rate(ai_sorter_batch_processing_duration_seconds_count[5m])",
+            "legendFormat": "Avg Batch Processing Time",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(ai_sorter_ai_api_duration_seconds_sum[5m]) / rate(ai_sorter_ai_api_duration_seconds_count[5m])",
+            "legendFormat": "Avg AI API Response Time",
+            "refId": "B"
+          },
+          {
+            "expr": "rate(ai_sorter_items_processed_total[5m])",
+            "legendFormat": "Items Processed/sec",
+            "refId": "C"
+          },
+          {
+            "expr": "ai_sorter_active_requests",
+            "legendFormat": "Active Requests",
+            "refId": "D"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Time/Count",
+            "min": 0
+          },
+          {
+            "show": false
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "OTLP Processing Performance",
+        "type": "graph",
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 22
+        },
+        "targets": [
+          {
+            "expr": "rate(otlp_exporter_sent_spans_total[5m])",
+            "legendFormat": "Spans Sent/sec",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(otlp_exporter_sent_metric_points_total[5m])",
+            "legendFormat": "Metric Points Sent/sec", 
+            "refId": "B"
+          },
+          {
+            "expr": "rate(otlp_processor_batch_batch_send_size_sum[5m]) / rate(otlp_processor_batch_batch_send_size_count[5m])",
+            "legendFormat": "Avg Batch Size",
+            "refId": "C"
+          },
+          {
+            "expr": "otlp_processor_batch_metadata_cardinality",
+            "legendFormat": "Metadata Cardinality",
+            "refId": "D"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Operations/sec",
+            "min": 0
+          },
+          {
+            "show": false
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Queue and Buffer Metrics",
+        "type": "graph",
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 30
+        },
+        "targets": [
+          {
+            "expr": "otlp_processor_batch_batch_send_queue_size",
+            "legendFormat": "{{instance}} - Batch Queue Size",
+            "refId": "A"
+          },
+          {
+            "expr": "ai_sorter_request_queue_size",
+            "legendFormat": "{{instance}} - AI Sorter Queue",
+            "refId": "B"
+          },
+          {
+            "expr": "alloy_component_buffer_size_bytes",
+            "legendFormat": "{{component}} - Buffer Size",
+            "refId": "C"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Queue Size / Buffer Bytes",
+            "min": 0
+          },
+          {
+            "show": false
+          }
+        ],
+        "thresholds": [
+          {
+            "value": 1000,
+            "colorMode": "warning",
+            "op": "gt"
+          },
+          {
+            "value": 5000,
+            "colorMode": "critical",
+            "op": "gt"
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Resource Efficiency Metrics",
+        "type": "graph", 
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 30
+        },
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total{job=\"ai-sorter\"}[5m])) / sum(rate(container_cpu_usage_seconds_total{pod=~\"ai-sorter.*\"}[5m]))",
+            "legendFormat": "AI Sorter RPS per CPU Core",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(rate(otlp_receiver_accepted_spans_total[5m])) / sum(rate(container_cpu_usage_seconds_total{pod=~\"alloy.*\"}[5m]))",
+            "legendFormat": "OTLP Spans per CPU Core",
+            "refId": "B"
+          },
+          {
+            "expr": "sum(rate(http_requests_total[5m])) / sum(container_memory_usage_bytes) * 1024 * 1024 * 1024",
+            "legendFormat": "RPS per GB Memory",
+            "refId": "C"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Efficiency Ratio",
+            "min": 0
+          },
+          {
+            "show": false
+          }
+        ]
+      },
+      {
+        "id": 9,
+        "title": "Performance Alerts and Anomalies",
+        "type": "table",
+        "gridPos": {
+          "h": 8,
+          "w": 24,
+          "x": 0,
+          "y": 38
+        },
+        "targets": [
+          {
+            "expr": "ALERTS{alertstate=\"firing\",severity=~\"warning|critical\"}",
+            "refId": "A",
+            "format": "table",
+            "instant": true
+          }
+        ],
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {
+                "__name__": true,
+                "job": true,
+                "instance": true,
+                "alertstate": true
+              },
+              "indexByName": {},
+              "renameByName": {
+                "alertname": "Alert Name",
+                "severity": "Severity",
+                "summary": "Summary",
+                "description": "Description"
+              }
+            }
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "align": "left",
+              "displayMode": "auto"
+            },
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Severity"
+              },
+              "properties": [
+                {
+                  "id": "custom.displayMode",
+                  "value": "color-background"
+                },
+                {
+                  "id": "thresholds",
+                  "value": {
+                    "steps": [
+                      {
+                        "color": "yellow",
+                        "value": null
+                      },
+                      {
+                        "color": "red",
+                        "value": 1
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "current": {
+            "selected": false,
+            "text": "5m",
+            "value": "5m"
+          },
+          "hide": 0,
+          "includeAll": false,
+          "label": "Rate Interval",
+          "multi": false,
+          "name": "rate_interval",
+          "options": [
+            {
+              "selected": false,
+              "text": "1m",
+              "value": "1m"
+            },
+            {
+              "selected": true,
+              "text": "5m",
+              "value": "5m"
+            },
+            {
+              "selected": false,
+              "text": "10m",
+              "value": "10m"
+            }
+          ],
+          "query": "1m,5m,10m",
+          "skipUrlSync": false,
+          "type": "custom"
+        },
+        {
+          "current": {
+            "selected": false,
+            "text": "All",
+            "value": "$__all"
+          },
+          "hide": 0,
+          "includeAll": true,
+          "label": "Instance",
+          "multi": true,
+          "name": "instance",
+          "options": [],
+          "query": "label_values(up, instance)",
+          "refresh": 1,
+          "regex": "",
+          "skipUrlSync": false,
+          "sort": 1,
+          "type": "query"
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "builtIn": 1,
+          "datasource": "-- Grafana --",
+          "enable": true,
+          "hide": true,
+          "iconColor": "rgba(0, 211, 255, 1)",
+          "name": "Annotations & Alerts",
+          "type": "dashboard"
+        },
+        {
+          "datasource": "prometheus",
+          "enable": true,
+          "expr": "increase(kube_pod_container_status_restarts_total[1h]) > 0",
+          "iconColor": "orange",
+          "name": "Pod Restarts",
+          "step": "60s",
+          "textFormat": "{{pod}} restarted",
+          "titleFormat": "Pod Restart"
+        }
+      ]
+    }
+  }
+}

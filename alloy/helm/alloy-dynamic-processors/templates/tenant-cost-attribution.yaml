@@ -1,0 +1,326 @@
+{{- if .Values.multiTenant.enabled }}
+{{- if .Values.multiTenant.costAttribution.enabled }}
+
+# Cost Attribution ServiceMonitor for Prometheus metrics collection
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "alloy-dynamic-processors.fullname" . }}-tenant-costs
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "alloy-dynamic-processors.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tenant-cost-attribution
+spec:
+  selector:
+    matchLabels:
+      {{- include "alloy-dynamic-processors.selectorLabels" . | nindent 6 }}
+  endpoints:
+  - port: metrics
+    interval: {{ .Values.multiTenant.costAttribution.scrapeInterval | default "30s" }}
+    path: /metrics
+    metricRelabelings:
+    # Add tenant cost attribution labels
+    - sourceLabels: [tenant_id]
+      targetLabel: cost_tenant_id
+    - sourceLabels: [tenant_tier]
+      targetLabel: cost_tier
+    - sourceLabels: [processing_region]
+      targetLabel: cost_region
+    - replacement: {{ .Values.multiTenant.costAttribution.instanceType | default "standard" }}
+      targetLabel: cost_instance_type
+    - replacement: {{ .Values.multiTenant.costAttribution.costModel | default "consumption" }}
+      targetLabel: cost_model
+
+# Cost metrics aggregation rules
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "alloy-dynamic-processors.fullname" . }}-tenant-cost-rules
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "alloy-dynamic-processors.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tenant-cost-attribution
+spec:
+  groups:
+  - name: tenant_cost_attribution
+    interval: {{ .Values.multiTenant.costAttribution.ruleInterval | default "60s" }}
+    rules:
+    
+    # Data volume metrics per tenant
+    - record: tenant:alloy_data_volume_bytes:rate5m
+      expr: |
+        sum(rate(alloy_otelcol_receiver_accepted_metric_points_total[5m]) * 8) by (tenant_id, tenant_tier)
+        + sum(rate(alloy_otelcol_receiver_accepted_log_records_total[5m]) * 100) by (tenant_id, tenant_tier)
+        + sum(rate(alloy_otelcol_receiver_accepted_spans_total[5m]) * 200) by (tenant_id, tenant_tier)
+    
+    # Processing cost per tenant (based on CPU usage)
+    - record: tenant:alloy_processing_cost_cpu:rate5m
+      expr: |
+        sum(rate(container_cpu_usage_seconds_total{container="alloy"}[5m])) by (tenant_id, tenant_tier) 
+        * {{ .Values.multiTenant.costAttribution.cpuCostPerSecond | default 0.0001 }}
+    
+    # Memory cost per tenant
+    - record: tenant:alloy_processing_cost_memory:rate5m
+      expr: |
+        sum(container_memory_working_set_bytes{container="alloy"}) by (tenant_id, tenant_tier)
+        * {{ .Values.multiTenant.costAttribution.memoryCostPerByte | default 0.000000001 }}
+    
+    # Network cost per tenant (egress)
+    - record: tenant:alloy_network_cost:rate5m
+      expr: |
+        sum(rate(container_network_transmit_bytes_total{container="alloy"}[5m])) by (tenant_id, tenant_tier)
+        * {{ .Values.multiTenant.costAttribution.networkCostPerByte | default 0.0001 }}
+    
+    # Storage cost per tenant (persistent volume usage)
+    - record: tenant:alloy_storage_cost:current
+      expr: |
+        sum(kubelet_volume_stats_used_bytes{persistentvolumeclaim=~".*alloy.*"}) by (tenant_id, tenant_tier)
+        * {{ .Values.multiTenant.costAttribution.storageCostPerByte | default 0.00001 }}
+    
+    # Total processing cost per tenant
+    - record: tenant:alloy_total_processing_cost:rate5m
+      expr: |
+        tenant:alloy_processing_cost_cpu:rate5m
+        + tenant:alloy_processing_cost_memory:rate5m
+        + tenant:alloy_network_cost:rate5m
+        + tenant:alloy_storage_cost:current
+    
+    # Cost per data point processed
+    - record: tenant:alloy_cost_per_datapoint:rate5m
+      expr: |
+        tenant:alloy_total_processing_cost:rate5m
+        / (
+          sum(rate(alloy_otelcol_receiver_accepted_metric_points_total[5m])) by (tenant_id, tenant_tier)
+          + sum(rate(alloy_otelcol_receiver_accepted_log_records_total[5m])) by (tenant_id, tenant_tier)
+          + sum(rate(alloy_otelcol_receiver_accepted_spans_total[5m])) by (tenant_id, tenant_tier)
+        )
+    
+    # Tenant resource utilization efficiency
+    - record: tenant:alloy_resource_efficiency:rate5m
+      expr: |
+        (
+          sum(rate(alloy_otelcol_exporter_sent_metric_points_total[5m])) by (tenant_id, tenant_tier)
+          + sum(rate(alloy_otelcol_exporter_sent_log_records_total[5m])) by (tenant_id, tenant_tier)
+          + sum(rate(alloy_otelcol_exporter_sent_spans_total[5m])) by (tenant_id, tenant_tier)
+        )
+        /
+        (
+          sum(rate(alloy_otelcol_receiver_accepted_metric_points_total[5m])) by (tenant_id, tenant_tier)
+          + sum(rate(alloy_otelcol_receiver_accepted_log_records_total[5m])) by (tenant_id, tenant_tier)
+          + sum(rate(alloy_otelcol_receiver_accepted_spans_total[5m])) by (tenant_id, tenant_tier)
+        ) * 100
+    
+    # Tenant SLA compliance metrics
+    - record: tenant:alloy_sla_latency_compliance:rate5m
+      expr: |
+        (
+          sum(rate(alloy_otelcol_processor_batch_timeout_trigger_send_total[5m])) by (tenant_id, tenant_tier)
+          /
+          sum(rate(alloy_otelcol_processor_batch_batch_send_size_trigger_send_total[5m])) by (tenant_id, tenant_tier)
+        ) * 100
+    
+    # Tenant quota utilization
+    - record: tenant:alloy_quota_utilization:current
+      expr: |
+        (
+          sum(alloy_otelcol_processor_memory_limiter_current_memory_usage) by (tenant_id, tenant_tier)
+          /
+          sum(alloy_otelcol_processor_memory_limiter_memory_limit) by (tenant_id, tenant_tier)
+        ) * 100
+
+  # Tenant billing and chargeback rules
+  - name: tenant_billing
+    interval: {{ .Values.multiTenant.costAttribution.billingInterval | default "300s" }}
+    rules:
+    
+    # Hourly cost accumulation per tenant
+    - record: tenant:alloy_hourly_cost
+      expr: |
+        sum_over_time(tenant:alloy_total_processing_cost:rate5m[1h]) * 12  # 5min intervals * 12 = 1 hour
+    
+    # Daily cost accumulation per tenant
+    - record: tenant:alloy_daily_cost
+      expr: |
+        sum_over_time(tenant:alloy_hourly_cost[24h])
+    
+    # Monthly cost projection per tenant
+    - record: tenant:alloy_monthly_cost_projection
+      expr: |
+        tenant:alloy_daily_cost * 30
+    
+    # Tenant cost efficiency ranking
+    - record: tenant:alloy_cost_efficiency_rank
+      expr: |
+        rank(tenant:alloy_cost_per_datapoint:rate5m)
+    
+    # Tenant overage detection (above quota)
+    - record: tenant:alloy_quota_overage_cost
+      expr: |
+        (tenant:alloy_quota_utilization:current > 100) * tenant:alloy_total_processing_cost:rate5m
+
+  # Tenant alerting rules for cost management
+  - name: tenant_cost_alerts
+    rules:
+    
+    # High cost tenant alert
+    - alert: TenantHighProcessingCost
+      expr: tenant:alloy_total_processing_cost:rate5m > {{ .Values.multiTenant.costAttribution.highCostThreshold | default 1.0 }}
+      for: 5m
+      labels:
+        severity: warning
+        component: cost-attribution
+      annotations:
+        summary: "Tenant {{ "{{ $labels.tenant_id }}" }} has high processing costs"
+        description: "Tenant {{ "{{ $labels.tenant_id }}" }} (tier: {{ "{{ $labels.tenant_tier }}" }}) is generating processing costs of {{ "{{ $value }}" }} per 5 minutes"
+    
+    # Quota exceeded alert
+    - alert: TenantQuotaExceeded
+      expr: tenant:alloy_quota_utilization:current > 95
+      for: 2m
+      labels:
+        severity: critical
+        component: cost-attribution
+      annotations:
+        summary: "Tenant {{ "{{ $labels.tenant_id }}" }} approaching quota limit"
+        description: "Tenant {{ "{{ $labels.tenant_id }}" }} is using {{ "{{ $value }}" }}% of allocated quota"
+    
+    # Inefficient tenant alert
+    - alert: TenantLowEfficiency
+      expr: tenant:alloy_resource_efficiency:rate5m < {{ .Values.multiTenant.costAttribution.lowEfficiencyThreshold | default 85 }}
+      for: 10m
+      labels:
+        severity: warning
+        component: cost-attribution
+      annotations:
+        summary: "Tenant {{ "{{ $labels.tenant_id }}" }} has low resource efficiency"
+        description: "Tenant {{ "{{ $labels.tenant_id }}" }} efficiency is {{ "{{ $value }}" }}%, indicating potential data quality issues"
+
+# ConfigMap for cost attribution dashboard configuration
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "alloy-dynamic-processors.fullname" . }}-cost-dashboard-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "alloy-dynamic-processors.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tenant-cost-attribution
+    grafana_dashboard: "1"
+data:
+  tenant-cost-attribution.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "Multi-Tenant Cost Attribution",
+        "tags": ["multi-tenant", "cost", "alloy"],
+        "timezone": "browser",
+        "panels": [
+          {
+            "id": 1,
+            "title": "Cost per Tenant",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "sum by (tenant_id, tenant_tier) (tenant:alloy_total_processing_cost:rate5m)",
+                "legendFormat": "{{ "{{tenant_id}}" }} ({{ "{{tenant_tier}}" }})"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "currencyUSD"
+              }
+            }
+          },
+          {
+            "id": 2,
+            "title": "Data Volume by Tenant",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "sum by (tenant_id) (tenant:alloy_data_volume_bytes:rate5m)",
+                "legendFormat": "{{ "{{tenant_id}}" }}"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "bytes"
+              }
+            }
+          },
+          {
+            "id": 3,
+            "title": "Resource Efficiency by Tenant",
+            "type": "bargauge",
+            "targets": [
+              {
+                "expr": "tenant:alloy_resource_efficiency:rate5m",
+                "legendFormat": "{{ "{{tenant_id}}" }}"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "percent",
+                "max": 100,
+                "thresholds": {
+                  "steps": [
+                    {"color": "red", "value": 0},
+                    {"color": "yellow", "value": 85},
+                    {"color": "green", "value": 95}
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "id": 4,
+            "title": "Quota Utilization",
+            "type": "piechart",
+            "targets": [
+              {
+                "expr": "tenant:alloy_quota_utilization:current",
+                "legendFormat": "{{ "{{tenant_id}}" }}"
+              }
+            ]
+          },
+          {
+            "id": 5,
+            "title": "Monthly Cost Projection",
+            "type": "table",
+            "targets": [
+              {
+                "expr": "tenant:alloy_monthly_cost_projection",
+                "format": "table",
+                "instant": true
+              }
+            ],
+            "transformations": [
+              {
+                "id": "organize",
+                "options": {
+                  "includeByName": {
+                    "tenant_id": true,
+                    "tenant_tier": true,
+                    "Value": true
+                  },
+                  "renameByName": {
+                    "tenant_id": "Tenant ID",
+                    "tenant_tier": "Tier",
+                    "Value": "Monthly Cost (USD)"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "refresh": "30s"
+      }
+    }
+
+{{- end }}
+{{- end }}

@@ -1,0 +1,397 @@
+groups:
+  # Service Health Alerts
+  - name: alloy.service.health
+    interval: 30s
+    rules:
+      - alert: ServiceDown
+        expr: up{job=~"ai-sorter|alloy|otlp"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: platform
+          component: "{{ $labels.job }}"
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "Service {{ $labels.job }} has been down for more than 1 minute on instance {{ $labels.instance }}"
+          runbook_url: "https://docs.company.com/runbooks/service-down"
+          dashboard_url: "https://grafana.company.com/d/service-health-overview"
+
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{status=~"5.."}[5m])) by (job) /
+            sum(rate(http_requests_total[5m])) by (job)
+          ) * 100 > 5
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+          component: "{{ $labels.job }}"
+        annotations:
+          summary: "High error rate detected for {{ $labels.job }}"
+          description: "Error rate is {{ $value | humanizePercentage }} for service {{ $labels.job }}, which is above the 5% threshold"
+          runbook_url: "https://docs.company.com/runbooks/high-error-rate"
+
+      - alert: HighResponseTime
+        expr: |
+          histogram_quantile(0.95, 
+            sum(rate(http_request_duration_seconds_bucket{job="ai-sorter"}[5m])) by (le)
+          ) > 2
+        for: 2m
+        labels:
+          severity: warning
+          team: platform
+          component: ai-sorter
+        annotations:
+          summary: "High response time for AI Sorter"
+          description: "95th percentile response time is {{ $value }}s for AI Sorter, which exceeds the 2s SLA"
+          runbook_url: "https://docs.company.com/runbooks/high-latency"
+
+      - alert: PodCrashLooping
+        expr: |
+          increase(kube_pod_container_status_restarts_total{namespace="monitoring",pod=~"(ai-sorter|alloy).*"}[1h]) > 3
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          component: "{{ $labels.pod }}"
+        annotations:
+          summary: "Pod {{ $labels.pod }} is crash looping"
+          description: "Pod {{ $labels.pod }} has restarted {{ $value }} times in the last hour"
+          runbook_url: "https://docs.company.com/runbooks/pod-crash-looping"
+
+  # Performance Alerts
+  - name: alloy.performance
+    interval: 30s
+    rules:
+      - alert: HighCPUUsage
+        expr: |
+          (
+            sum(rate(container_cpu_usage_seconds_total{pod=~"(ai-sorter|alloy).*"}[5m])) by (pod) /
+            sum(kube_pod_container_resource_limits{resource="cpu",pod=~"(ai-sorter|alloy).*"}) by (pod)
+          ) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          component: "{{ $labels.pod }}"
+        annotations:
+          summary: "High CPU usage on {{ $labels.pod }}"
+          description: "CPU usage is {{ $value | humanizePercentage }} on pod {{ $labels.pod }}"
+          runbook_url: "https://docs.company.com/runbooks/high-cpu-usage"
+
+      - alert: HighMemoryUsage
+        expr: |
+          (
+            sum(container_memory_usage_bytes{pod=~"(ai-sorter|alloy).*"}) by (pod) /
+            sum(kube_pod_container_resource_limits{resource="memory",pod=~"(ai-sorter|alloy).*"}) by (pod)
+          ) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          component: "{{ $labels.pod }}"
+        annotations:
+          summary: "High memory usage on {{ $labels.pod }}"
+          description: "Memory usage is {{ $value | humanizePercentage }} on pod {{ $labels.pod }}"
+          runbook_url: "https://docs.company.com/runbooks/high-memory-usage"
+
+      - alert: HighThroughput
+        expr: |
+          sum(rate(http_requests_total{job="ai-sorter"}[5m])) > 50
+        for: 3m
+        labels:
+          severity: info
+          team: platform
+          component: ai-sorter
+        annotations:
+          summary: "AI Sorter experiencing high throughput"
+          description: "AI Sorter is processing {{ $value }} requests/second, consider scaling"
+          runbook_url: "https://docs.company.com/runbooks/scaling-recommendations"
+
+      - alert: QueueBacklog
+        expr: |
+          ai_sorter_request_queue_size > 100
+        for: 2m
+        labels:
+          severity: warning
+          team: platform
+          component: ai-sorter
+        annotations:
+          summary: "AI Sorter request queue is backing up"
+          description: "Request queue size is {{ $value }}, indicating processing delays"
+          runbook_url: "https://docs.company.com/runbooks/queue-backlog"
+
+  # AI Sorter Specific Alerts
+  - name: alloy.ai-sorter
+    interval: 30s
+    rules:
+      - alert: AIAPIFailures
+        expr: |
+          sum(rate(ai_sorter_api_calls_total{status="error"}[5m])) /
+          sum(rate(ai_sorter_api_calls_total[5m])) * 100 > 10
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+          component: ai-sorter
+        annotations:
+          summary: "High AI API failure rate"
+          description: "AI API failure rate is {{ $value | humanizePercentage }}, check API connectivity and quotas"
+          runbook_url: "https://docs.company.com/runbooks/ai-api-failures"
+
+      - alert: ClassificationAccuracyDrop
+        expr: |
+          ai_sorter_classification_accuracy < 0.85
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          component: ai-sorter
+        annotations:
+          summary: "AI classification accuracy has dropped"
+          description: "Classification accuracy is {{ $value | humanizePercentage }}, below 85% threshold"
+          runbook_url: "https://docs.company.com/runbooks/ai-accuracy-drop"
+
+      - alert: APIKeyValidationFailures
+        expr: |
+          sum(rate(ai_sorter_api_key_validation_failures_total[5m])) > 5
+        for: 1m
+        labels:
+          severity: warning
+          team: security
+          component: ai-sorter
+        annotations:
+          summary: "Multiple API key validation failures"
+          description: "{{ $value }} API key validation failures per second, possible unauthorized access attempts"
+          runbook_url: "https://docs.company.com/runbooks/security-incidents"
+
+  # OTLP and Alloy Alerts
+  - name: alloy.otlp
+    interval: 30s
+    rules:
+      - alert: OTLPIngestionFailures
+        expr: |
+          sum(rate(otlp_receiver_refused_spans_total[5m])) /
+          sum(rate(otlp_receiver_accepted_spans_total[5m])) * 100 > 5
+        for: 2m
+        labels:
+          severity: warning
+          team: platform
+          component: alloy
+        annotations:
+          summary: "High OTLP ingestion failure rate"
+          description: "OTLP refusal rate is {{ $value | humanizePercentage }}, check resource limits and network connectivity"
+          runbook_url: "https://docs.company.com/runbooks/otlp-failures"
+
+      - alert: AlloyComponentErrors
+        expr: |
+          sum(increase(alloy_component_evaluation_errors_total[5m])) > 10
+        for: 2m
+        labels:
+          severity: warning
+          team: platform
+          component: alloy
+        annotations:
+          summary: "Alloy component evaluation errors"
+          description: "{{ $value }} component evaluation errors in the last 5 minutes"
+          runbook_url: "https://docs.company.com/runbooks/alloy-component-errors"
+
+      - alert: DataExportFailures
+        expr: |
+          sum(rate(otlp_exporter_send_failed_spans_total[5m])) > 1
+        for: 3m
+        labels:
+          severity: critical
+          team: platform
+          component: alloy
+        annotations:
+          summary: "Data export failures to backend"
+          description: "{{ $value }} span export failures per second to downstream systems"
+          runbook_url: "https://docs.company.com/runbooks/export-failures"
+
+  # Security Alerts
+  - name: alloy.security
+    interval: 30s
+    rules:
+      - alert: UnauthorizedAccessAttempts
+        expr: |
+          sum(rate(http_requests_total{status="401"}[5m])) > 10
+        for: 1m
+        labels:
+          severity: warning
+          team: security
+          component: auth
+        annotations:
+          summary: "High number of unauthorized access attempts"
+          description: "{{ $value }} unauthorized access attempts per second"
+          runbook_url: "https://docs.company.com/runbooks/security-incidents"
+
+      - alert: PotentialDDoSAttack
+        expr: |
+          sum(rate(http_requests_total[1m])) > 1000
+        for: 30s
+        labels:
+          severity: critical
+          team: security
+          component: loadbalancer
+        annotations:
+          summary: "Potential DDoS attack detected"
+          description: "Request rate is {{ $value }}/second, significantly above normal levels"
+          runbook_url: "https://docs.company.com/runbooks/ddos-response"
+
+      - alert: SecurityScanVulnerabilities
+        expr: |
+          sum(security_scan_findings{severity=~"high|critical"}) > 0
+        for: 5m
+        labels:
+          severity: warning
+          team: security
+          component: scanner
+        annotations:
+          summary: "High/critical vulnerabilities found"
+          description: "{{ $value }} high or critical vulnerabilities detected in security scan"
+          runbook_url: "https://docs.company.com/runbooks/vulnerability-response"
+
+      - alert: ComplianceViolation
+        expr: |
+          sum(compliance_check_passed{standard=~"SOC2|GDPR|HIPAA"}) by (standard) /
+          sum(compliance_check_total{standard=~"SOC2|GDPR|HIPAA"}) by (standard) * 100 < 95
+        for: 5m
+        labels:
+          severity: critical
+          team: compliance
+          component: "{{ $labels.standard }}"
+        annotations:
+          summary: "{{ $labels.standard }} compliance violation"
+          description: "{{ $labels.standard }} compliance is at {{ $value | humanizePercentage }}, below 95% threshold"
+          runbook_url: "https://docs.company.com/runbooks/compliance-violation"
+
+  # Cost and Resource Alerts
+  - name: alloy.cost
+    interval: 5m
+    rules:
+      - alert: HighResourceWaste
+        expr: |
+          (
+            (
+              sum by (pod) (kube_pod_container_resource_requests{resource="cpu"}) -
+              sum by (pod) (rate(container_cpu_usage_seconds_total[24h]))
+            ) /
+            sum by (pod) (kube_pod_container_resource_requests{resource="cpu"})
+          ) * 100 > 50
+        for: 30m
+        labels:
+          severity: info
+          team: finops
+          component: "{{ $labels.pod }}"
+        annotations:
+          summary: "High resource waste detected"
+          description: "Pod {{ $labels.pod }} has {{ $value | humanizePercentage }} CPU waste"
+          runbook_url: "https://docs.company.com/runbooks/resource-optimization"
+
+      - alert: MonthlyCostSpike
+        expr: |
+          (
+            sum(kube_pod_container_resource_requests{resource="cpu"}) * 0.05 * 730 +
+            sum(kube_pod_container_resource_requests{resource="memory"}) / 1024 / 1024 / 1024 * 0.01 * 730
+          ) > 1000
+        for: 1h
+        labels:
+          severity: warning
+          team: finops
+          component: billing
+        annotations:
+          summary: "Monthly cost projection exceeds budget"
+          description: "Projected monthly cost is ${{ $value }}, exceeding $1000 budget"
+          runbook_url: "https://docs.company.com/runbooks/cost-optimization"
+
+  # SLA and Business Impact Alerts
+  - name: alloy.sla
+    interval: 30s
+    rules:
+      - alert: SLAViolation
+        expr: |
+          (
+            sum(rate(http_requests_total{status=~"[45].."}[5m])) /
+            sum(rate(http_requests_total[5m]))
+          ) * 100 > 0.1
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+          component: sla
+        annotations:
+          summary: "SLA violation - availability below 99.9%"
+          description: "Service availability is {{ 100 - $value | humanizePercentage }} over the last 5 minutes"
+          runbook_url: "https://docs.company.com/runbooks/sla-violation"
+
+      - alert: CustomerImpactingIssue
+        expr: |
+          sum(rate(http_requests_total{job="ai-sorter",status=~"5.."}[2m])) > 5
+        for: 1m
+        labels:
+          severity: critical
+          team: platform
+          component: ai-sorter
+          customer_impact: "high"
+        annotations:
+          summary: "Customer-impacting AI Sorter failures"
+          description: "{{ $value }} AI Sorter failures per second are affecting customer requests"
+          runbook_url: "https://docs.company.com/runbooks/customer-impact"
+
+  # Capacity Planning Alerts
+  - name: alloy.capacity
+    interval: 5m
+    rules:
+      - alert: ScalingRecommendation
+        expr: |
+          predict_linear(sum(rate(http_requests_total{job="ai-sorter"}[5m]))[1h:1m], 3600) > 40
+        for: 10m
+        labels:
+          severity: info
+          team: platform
+          component: ai-sorter
+        annotations:
+          summary: "AI Sorter scaling recommended"
+          description: "Predicted load in 1 hour: {{ $value }} RPS, consider scaling up"
+          runbook_url: "https://docs.company.com/runbooks/scaling-procedures"
+
+      - alert: StorageSpaceLow
+        expr: |
+          (
+            kubelet_volume_stats_available_bytes{persistentvolumeclaim=~".*alloy.*"} /
+            kubelet_volume_stats_capacity_bytes{persistentvolumeclaim=~".*alloy.*"}
+          ) * 100 < 20
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+          component: storage
+        annotations:
+          summary: "Low storage space on {{ $labels.persistentvolumeclaim }}"
+          description: "Only {{ $value | humanizePercentage }} storage space remaining"
+          runbook_url: "https://docs.company.com/runbooks/storage-expansion"
+
+# Inhibit rules to reduce alert noise
+inhibit_rules:
+  # Don't alert on individual component issues if the whole service is down
+  - source_match:
+      alertname: ServiceDown
+    target_match_re:
+      alertname: "High.*|.*Failures|.*Errors"
+    equal: ['job']
+
+  # Don't alert on high resource usage if pod is crash looping
+  - source_match:
+      alertname: PodCrashLooping
+    target_match_re:
+      alertname: "High.*Usage"
+    equal: ['pod']
+
+  # Don't alert on individual metrics if there's a customer-impacting issue
+  - source_match:
+      alertname: CustomerImpactingIssue
+    target_match_re:
+      alertname: "High.*|.*Failures"
+    equal: ['component']

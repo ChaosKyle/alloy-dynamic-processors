@@ -1,0 +1,512 @@
+# Multi-tenant deployment example values
+# This file demonstrates how to configure the alloy-dynamic-processors Helm chart
+# for a multi-tenant observability deployment with different service tiers
+
+# Global configuration
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+  storageClass: "fast-ssd"
+
+# Grafana Alloy configuration for multi-tenant deployment
+alloy:
+  image:
+    registry: docker.io
+    repository: grafana/alloy
+    tag: "v1.0.0"
+    pullPolicy: IfNotPresent
+  
+  # Scale up for multi-tenant workload
+  replicaCount: 3
+  
+  # Use multi-tenant configuration
+  config:
+    type: "multi-tenant"
+    
+    # Environment variables for multi-tenant processing
+    env:
+      APP_NAME: "alloy-multi-tenant"
+      APP_VERSION: "2.1.0"
+      ENVIRONMENT: "production"
+      SERVICE_NAMESPACE: "observability"
+      LOG_LEVEL: "info"
+      
+      # Multi-tenant specific settings
+      TOTAL_MEMORY_LIMIT_MIB: "8192"
+      TOTAL_SPIKE_LIMIT_MIB: "2048"
+      DEFAULT_TENANT_ISOLATION: "standard"
+      DEFAULT_COST_CENTER: "shared"
+      PROCESSING_REGION: "us-west-2"
+      INSTANCE_TYPE: "c5.4xlarge"
+      
+      # Kubernetes settings
+      K8S_CLUSTER_NAME: "production-cluster"
+      CLOUD_REGION: "us-west-2"
+  
+  # Resource allocation for multi-tenant processing
+  resources:
+    limits:
+      cpu: 4000m
+      memory: 8Gi
+    requests:
+      cpu: 2000m
+      memory: 4Gi
+  
+  # Anti-affinity for high availability
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values:
+              - alloy-dynamic-processors
+          topologyKey: kubernetes.io/hostname
+  
+  # Service configuration with additional ports for tenant isolation
+  service:
+    type: ClusterIP
+    ports:
+      http: 12345
+      otlp-grpc: 4317
+      otlp-http: 4318
+      health: 13133
+      metrics: 8889
+      zpages: 55679
+      pprof: 1777
+      # Additional ports for dedicated tenant receivers
+      tenant-premium-grpc: 4327
+      tenant-premium-http: 4328
+      tenant-enterprise-grpc: 4337
+      tenant-enterprise-http: 4338
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+      service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+  
+  # Persistent storage for tenant configurations and cache
+  persistence:
+    enabled: true
+    storageClass: "fast-ssd"
+    accessMode: ReadWriteOnce
+    size: 50Gi
+    annotations:
+      volume.beta.kubernetes.io/storage-class: "fast-ssd"
+
+# Grafana Cloud configuration with tenant-specific endpoints
+grafanaCloud:
+  enabled: true
+  
+  # Use per-tenant credentials
+  credentials:
+    existingSecret: "grafana-cloud-multi-tenant-secrets"
+
+# Enhanced service monitoring for multi-tenant metrics
+serviceMonitor:
+  enabled: true
+  interval: 15s
+  scrapeTimeout: 10s
+  labels:
+    team: platform
+    environment: production
+  metricRelabelings:
+  - sourceLabels: [tenant_id]
+    targetLabel: cost_tenant_id
+  - sourceLabels: [tenant_tier]
+    targetLabel: billing_tier
+
+# Multi-tenant RBAC with enhanced security
+rbac:
+  create: true
+  rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["servicemonitors", "podmonitors", "prometheusrules"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+
+# Service account configuration
+serviceAccount:
+  create: true
+  name: "alloy-multi-tenant"
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/alloy-multi-tenant-role"
+
+# Ingress for multi-tenant access
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/rate-limit: "1000"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+  hosts:
+  - host: alloy-mt.example.com
+    paths:
+    - path: /
+      pathType: Prefix
+      port: http
+  - host: alloy-mt-premium.example.com
+    paths:
+    - path: /
+      pathType: Prefix
+      port: tenant-premium-http
+  tls:
+  - secretName: alloy-mt-tls
+    hosts:
+    - alloy-mt.example.com
+    - alloy-mt-premium.example.com
+
+# Horizontal Pod Autoscaler for dynamic scaling
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 60
+
+# Pod Disruption Budget for high availability
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+# Network Policy for tenant isolation
+networkPolicy:
+  enabled: true
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    - namespaceSelector:
+        matchLabels:
+          tenant-access: "allowed"
+    ports:
+    - protocol: TCP
+      port: 4317
+    - protocol: TCP
+      port: 4318
+
+# Multi-tenant configuration
+multiTenant:
+  enabled: true
+  
+  global:
+    region: "us-west-2"
+    processingRegion: "us-west-2"
+    instanceType: "c5.4xlarge"
+    
+    defaultQuotas:
+      memoryLimitMib: 1024
+      spikeLimitMib: 256
+      maxConcurrentStreams: 100
+      batchSize: 1024
+      batchTimeout: "15s"
+      retentionDays: 30
+  
+  rbac:
+    enabled: true
+    clusterRoleEnabled: true
+    namespaceIsolation: true
+  
+  networkIsolation:
+    enabled: true
+    defaultPolicy: "deny-all"
+  
+  namespaceIsolation:
+    enabled: true
+    namespacePrefix: "tenant-"
+  
+  costAttribution:
+    enabled: true
+    scrapeInterval: "15s"
+    ruleInterval: "30s"
+    billingInterval: "60s"
+    
+    # AWS cost model
+    cpuCostPerSecond: 0.000048  # c5.4xlarge pricing
+    memoryCostPerByte: 0.0000000053
+    networkCostPerByte: 0.09
+    storageCostPerByte: 0.10
+    
+    highCostThreshold: 5.0
+    lowEfficiencyThreshold: 90
+    
+    instanceType: "c5.4xlarge"
+    costModel: "tiered"
+  
+  # Production tenant configuration
+  tenants:
+  # Premium tier - Financial services customer
+  - id: "fintech-premium"
+    name: "FinTech Premium Corp"
+    tier: "premium"
+    organization: "fintech-corp"
+    region: "us-west-2"
+    
+    quotas:
+      memoryLimitMib: 4096
+      spikeLimitMib: 1024
+      maxConcurrentStreams: 500
+      batchSize: 4096
+      batchTimeout: "3s"
+      retentionDays: 365  # Financial compliance
+    
+    costCenter:
+      id: "fintech-premium-cc"
+      department: "platform-engineering"
+      project: "trading-platform"
+      billingAccount: "premium-financial"
+    
+    rbac:
+      enabled: true
+      users:
+      - name: "admin@fintech-corp.com"
+      - name: "ops@fintech-corp.com"
+      - name: "compliance@fintech-corp.com"
+      groups:
+      - name: "fintech-platform-team"
+      - name: "fintech-compliance-team"
+      serviceAccounts:
+      - name: "trading-platform-sa"
+        namespace: "tenant-fintech-premium"
+      - name: "risk-engine-sa"
+        namespace: "tenant-fintech-premium"
+    
+    routing:
+      dedicatedReceiver:
+        enabled: true
+        grpcPort: 4327
+        httpPort: 4328
+      
+      exporters:
+        tempo:
+          endpoint: "https://tempo-fintech.grafana.net:443"
+          auth:
+            secretName: "fintech-premium-auth"
+            usernameKey: "tempo_user"
+            passwordKey: "tempo_key"
+        loki:
+          endpoint: "https://logs-fintech.grafana.net/loki/api/v1/push"
+          auth:
+            secretName: "fintech-premium-auth"
+            usernameKey: "loki_user"
+            passwordKey: "loki_key"
+        prometheus:
+          endpoint: "https://prometheus-fintech.grafana.net/api/prom/push"
+          auth:
+            secretName: "fintech-premium-auth"
+            usernameKey: "prom_user"
+            passwordKey: "prom_key"
+    
+    filtering:
+      allowedNamespaces:
+      - "tenant-fintech-premium"
+      - "fintech-trading"
+      - "fintech-risk"
+      - "fintech-compliance"
+      customRules:
+      - type: "allow"
+        pattern: "service.name=trading-*"
+      - type: "allow"
+        pattern: "service.name=risk-*"
+      - type: "block"
+        pattern: "level=DEBUG"  # No debug logs for compliance
+    
+    sla:
+      targetLatencyMs: 50
+      targetAvailability: 99.99
+      targetThroughputRps: 50000
+    
+    networkIsolation:
+      enabled: true
+      allowedIngress:
+      - podSelector:
+          matchLabels:
+            tenant: "fintech-premium"
+        ports:
+        - protocol: TCP
+          port: 4327
+        - protocol: TCP
+          port: 4328
+      allowedEgress:
+      - ipBlock:
+          cidr: "10.0.0.0/8"  # Internal network
+      - ipBlock:
+          cidr: "0.0.0.0/0"  # Grafana Cloud
+          except:
+          - "169.254.0.0/16"  # Block metadata service
+    
+    monitoring:
+      enabled: true
+      customDashboards:
+      - name: "fintech-trading-dashboard"
+        configMapKey: "trading-dashboard.json"
+      - name: "fintech-compliance-dashboard"
+        configMapKey: "compliance-dashboard.json"
+      alertRules:
+      - name: "fintech-trading-alerts"
+        rules:
+        - alert: "TradingSystemDown"
+          expr: "up{service=\"trading-engine\"} == 0"
+          for: "30s"
+          severity: "critical"
+      alerting:
+        enabled: true
+        webhooks:
+        - url: "https://alerts.fintech-corp.com/critical"
+          secretName: "fintech-alert-webhook"
+        - url: "https://pagerduty.com/integration/fintech"
+          secretName: "fintech-pagerduty-key"
+        channels:
+        - type: "slack"
+          webhook: "https://hooks.slack.com/fintech-alerts"
+          secretName: "fintech-slack-webhook"
+  
+  # Enterprise tier - E-commerce platform
+  - id: "ecommerce-enterprise"
+    name: "E-Commerce Enterprise"
+    tier: "enterprise"
+    organization: "ecommerce-corp"
+    
+    quotas:
+      memoryLimitMib: 2048
+      spikeLimitMib: 512
+      maxConcurrentStreams: 200
+      batchSize: 2048
+      batchTimeout: "7s"
+      retentionDays: 90
+    
+    costCenter:
+      id: "ecommerce-platform-cc"
+      department: "engineering"
+      project: "marketplace-platform"
+      billingAccount: "enterprise-ecommerce"
+    
+    rbac:
+      enabled: true
+      users:
+      - name: "platform@ecommerce-corp.com"
+      - name: "devops@ecommerce-corp.com"
+      groups:
+      - name: "ecommerce-platform-team"
+      - name: "ecommerce-sre-team"
+    
+    routing:
+      exporters:
+        tempo:
+          endpoint: "https://tempo-ecommerce.grafana.net:443"
+          auth:
+            secretName: "ecommerce-enterprise-auth"
+            usernameKey: "username"
+            passwordKey: "password"
+        loki:
+          endpoint: "https://logs-ecommerce.grafana.net/loki/api/v1/push"
+          auth:
+            secretName: "ecommerce-enterprise-auth"
+            usernameKey: "username"
+            passwordKey: "password"
+    
+    filtering:
+      allowedNamespaces:
+      - "tenant-ecommerce-enterprise"
+      - "ecommerce-frontend"
+      - "ecommerce-backend"
+      - "ecommerce-payments"
+      customRules:
+      - type: "allow"
+        pattern: "service.name=marketplace-*"
+      - type: "allow"
+        pattern: "service.name=payment-*"
+    
+    sla:
+      targetLatencyMs: 200
+      targetAvailability: 99.9
+      targetThroughputRps: 20000
+    
+    monitoring:
+      enabled: true
+      alerting:
+        enabled: true
+        webhooks:
+        - url: "https://alerts.ecommerce-corp.com/webhook"
+          secretName: "ecommerce-alert-webhook"
+  
+  # Basic tier - Startup customer
+  - id: "startup-basic"
+    name: "Startup Basic"
+    tier: "basic"
+    organization: "startup-corp"
+    
+    quotas:
+      memoryLimitMib: 512
+      spikeLimitMib: 128
+      maxConcurrentStreams: 50
+      batchSize: 512
+      batchTimeout: "30s"
+      retentionDays: 30
+    
+    costCenter:
+      id: "startup-basic-cc"
+      department: "engineering"
+      project: "mvp-platform"
+      billingAccount: "startup-basic"
+    
+    rbac:
+      enabled: true
+      users:
+      - name: "admin@startup-corp.com"
+    
+    routing:
+      exporters:
+        tempo:
+          endpoint: "https://tempo-shared.grafana.net:443"
+          auth:
+            secretName: "basic-shared-auth"
+            usernameKey: "username"
+            passwordKey: "password"
+    
+    filtering:
+      allowedNamespaces:
+      - "tenant-startup-basic"
+      - "startup-apps"
+    
+    sla:
+      targetLatencyMs: 1000
+      targetAvailability: 99.0
+      targetThroughputRps: 1000
+    
+    monitoring:
+      enabled: true
+      alerting:
+        enabled: false  # Basic tier has limited alerting
+
+# Test configuration
+tests:
+  enabled: true
+  image:
+    registry: docker.io
+    repository: curlimages/curl
+    tag: "7.87.0"
+    pullPolicy: IfNotPresent
