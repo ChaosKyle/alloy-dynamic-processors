@@ -1,652 +1,403 @@
-# Grafana Alloy Dynamic Processors Lab
+# Alloy Dynamic Processors
 
-[![Grafana Alloy](https://img.shields.io/badge/Grafana_Alloy-F46800?style=for-the-badge&logo=grafana&logoColor=white)](https://grafana.com/docs/alloy/)
-[![OpenTelemetry](https://img.shields.io/badge/OpenTelemetry-000000?style=for-the-badge&logo=opentelemetry&logoColor=white)](https://opentelemetry.io/)
-[![Grafana Cloud](https://img.shields.io/badge/Grafana_Cloud-F46800?style=for-the-badge&logo=grafana&logoColor=white)](https://grafana.com/cloud/)
+[![CI](https://github.com/ChaosKyle/alloy-dynamic-processors/actions/workflows/ci.yml/badge.svg)](https://github.com/ChaosKyle/alloy-dynamic-processors/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Kubernetes](https://img.shields.io/badge/kubernetes-%23326ce5.svg?style=flat&logo=kubernetes&logoColor=white)](https://kubernetes.io/)
 
-> **Grafana Alloy version** of the OpenTelemetry Dynamic Processors Lab - featuring advanced resource detection, intelligent labeling strategies, intelligent sorting capabilities, and seamless Grafana Cloud integration using Grafana's vendor-agnostic distribution of the OpenTelemetry Collector.
+Production-ready **Grafana Alloy** telemetry processing with advanced resource detection, intelligent labeling strategies, optional AI-powered classification, and seamless Grafana Cloud integration.
 
-## 🌟 What Makes This Alloy Version Special
+## 🎯 Features
 
-This Alloy implementation provides **identical core functionality** to the original OTel Collector version but optimized for **Grafana Cloud users** who want:
+### Core Capabilities
+- **Grafana Alloy Pipeline**: Vendor-agnostic OpenTelemetry distribution with River configuration language
+- **Multi-Protocol Support**: OTLP (gRPC/HTTP), Prometheus, Loki ingestion
+- **Dynamic Processing**: Intelligent routing, filtering, and transformation of telemetry data
+- **AI-Powered Classification** *(Optional)*: Automatic severity detection and intelligent categorization via Grok API
+- **Grafana Cloud Native**: Optimized for Grafana Cloud (Tempo, Loki, Prometheus, Mimir)
 
-- ✅ **Vendor-Agnostic**: Uses Grafana Alloy (vendor-agnostic OTel distribution)
-- ✅ **River Configuration**: Modern HCL-like syntax for better readability
-- ✅ **Grafana Cloud Optimized**: Built-in support for Grafana Cloud services
-- ✅ **Lightweight & Composable**: Better resource utilization and scaling
-- ✅ **Full-Stack Integration**: Seamless integration with Grafana observability stack
+### Production-Ready
+- ✅ **Multi-arch Docker Images** (amd64, arm64) with signed containers (cosign)
+- ✅ **Kubernetes Helm Chart** with HPA, PDB, NetworkPolicy, RBAC
+- ✅ **Circuit Breaker Pattern** for AI API resilience
+- ✅ **Comprehensive Observability**: 2 Grafana dashboards, 20+ Prometheus alerts
+- ✅ **Security Hardened**: Non-root containers, read-only filesystem, PII redaction
+- ✅ **Zero-Trust Networking**: NetworkPolicies for ingress/egress control
+- ✅ **SBOM & Vulnerability Scanning**: Automated supply chain security
+- ✅ **End-to-End Tests**: Full integration test suite with synthetic telemetry
 
-## 📚 Table of Contents
+## 📚 Documentation
 
-- [🚀 Quick Start](#-quick-start)
-- [🤖 AI-Driven Intelligent Sorting](#-ai-driven-intelligent-sorting)
-- [🏗️ Architecture Overview](#️-architecture-overview)
-- [🔧 Alloy vs OTel Collector](#-alloy-vs-otel-collector)
-- [⚙️ Configuration](#️-configuration)
-- [🚀 Deployment](#-deployment)
-- [🧪 Testing](#-testing)
-- [📊 Monitoring](#-monitoring)
-- [🔄 Migration Guide](#-migration-guide)
-- [🛠️ Troubleshooting](#️-troubleshooting)
+| Document | Description |
+|----------|-------------|
+| [Overview](docs/overview.md) | Architecture diagrams, component details, data flows |
+| [Migration Guide](docs/MIGRATION.md) | Moving from OpenTelemetry Collector to Alloy |
+| [Release Process](docs/release.md) | Release checklist, versioning, hotfix procedures |
+| [Architecture Decisions](docs/DECISIONS.md) | ADRs documenting key technical decisions |
+| [CHANGELOG](CHANGELOG.md) | Detailed release notes and version history |
+| [Contributing](CONTRIBUTING.md) | Development guidelines and PR process |
+| [Security Policy](SECURITY.md) | Vulnerability reporting and security practices |
 
 ## 🚀 Quick Start
 
-### Step 1: Configure Environment
+### Prerequisites
 
-```bash
-# Clone and navigate to Alloy directory
-cd alloy/
+- **Docker** & **Docker Compose** (for local deployment)
+- **Kubernetes 1.21+** with **Helm 3.8+** (for Kubernetes deployment)
+- **Grafana Cloud account** (optional, for cloud integration)
+- **xAI Grok API key** (optional, for AI classification)
 
-# Update your Grafana Cloud credentials
-cat > ../.env << EOF
-# Grafana Cloud Configuration
-GRAFANA_CLOUD_INSTANCE_ID=123456
-GRAFANA_CLOUD_API_KEY=glc_your_api_key_here
-GRAFANA_CLOUD_PROMETHEUS_URL=https://prometheus-prod-01-eu-west-0.grafana.net/api/prom/push
-GRAFANA_CLOUD_TEMPO_URL=https://tempo-prod-04-eu-west-0.grafana.net:443
-GRAFANA_CLOUD_LOKI_URL=https://logs-prod-006.grafana.net/loki/api/v1/push
+### Local Development with Docker Compose
 
-# Application Configuration
-APP_NAME=alloy-otel-lab
-APP_VERSION=1.0.0
-ENVIRONMENT=development
-SERVICE_NAMESPACE=alloy-monitoring
-CLUSTER_NAME=local-alloy-cluster
-REGION=us-west-2
-
-# AI Sorter Configuration (optional)
-GROK_API_KEY=your-grok-api-key-here
-AI_SORTER_ENABLED=false
-EOF
-```
-
-### Step 2: Deploy Alloy Stack
-
-```bash
-# Deploy with enhanced sorting configuration
-./scripts/deploy-alloy.sh deploy
-
-# Check status
-./scripts/deploy-alloy.sh status
-
-# View logs
-./scripts/deploy-alloy.sh logs
-```
-
-### Step 3: Run Tests
-
-```bash
-# Run comprehensive test suite
-./scripts/test-alloy.sh
-
-# Run specific tests
-./scripts/test-alloy.sh sorting
-./scripts/test-alloy.sh performance
-```
-
-### Step 4: Access Services
-
-- **Grafana Alloy UI**: http://localhost:12345
-- **Grafana Dashboard**: http://localhost:3000 (admin/admin)
-- **Prometheus**: http://localhost:9090
-- **Health Check**: http://localhost:13133
-- **Metrics**: http://localhost:8889/metrics
-
-## 🤖 AI-Driven Intelligent Sorting
-
-This feature adds a FastAPI sidecar to classify and route telemetry data using an AI API (e.g., xAI Grok). It processes logs, metrics, or traces, assigns categories (e.g., critical, info), and forwards them to appropriate destinations.
-
-### Features
-
-- **🧠 AI-Powered Classification**: Uses xAI Grok API to intelligently classify telemetry data
-- **🎯 Smart Routing**: Routes data based on AI classification to different destinations:
-  - **Critical**: High-priority data sent to alerting systems
-  - **Warning**: Medium-priority data sent to storage
-  - **Info**: Low-priority data sent to archive
-- **🔄 Real-time Processing**: FastAPI sidecar processes telemetry in real-time
-- **🛡️ Secure**: API keys managed through Kubernetes secrets
-- **📊 Monitoring**: Built-in health checks and metrics
-
-### Quick Setup
-
-1. **Enable AI Sorter**:
+1. **Clone and configure**:
    ```bash
-   # Set in your .env file
-   AI_SORTER_ENABLED=true
-   GROK_API_KEY=your-grok-api-key-here
+   git clone https://github.com/ChaosKyle/alloy-dynamic-processors.git
+   cd alloy-dynamic-processors
+   cp .env.example .env
+   # Edit .env with your credentials (optional for local testing)
    ```
 
-2. **Deploy with AI Sorting**:
+2. **Start the stack** (Alloy + Prometheus + Loki + Tempo + Grafana):
    ```bash
-   # Deploy with AI sorter configuration
-   ./scripts/deploy-alloy.sh deploy --config ai_sorter
-   
-   # Or build AI sorter image separately
-   ./scripts/deploy-alloy.sh build-ai
+   make up
+   # Or: docker compose up -d
    ```
 
-3. **Kubernetes Deployment**:
+3. **With AI Sorter enabled** (requires API key):
    ```bash
-   # Create secret for API key
-   kubectl create secret generic ai-sorter-secrets \
-     --from-literal=grok-api-key=your-grok-api-key-here
-   
-   # Deploy with Helm
-   helm upgrade alloy helm/ --set aiSorter.enabled=true
+   make up-ai
+   # Or: docker compose --profile ai up -d
    ```
 
-### Configuration
-
-Configure Alloy to use AI sorting in your River configuration:
-
-```hcl
-// Use the ai_sorter.river configuration
-otelcol.receiver.otlp "default" {
-    // ... receiver config
-}
-
-otelcol.processor.batch "ai_batch" {
-    // Batches data for AI analysis
-}
-
-otelcol.processor.routing "ai_router" {
-    // Routes based on AI classification
-    from_attribute = "ai.forward_to"
-    
-    table = [
-        { value = "alerting", pipelines = ["alerting"] },
-        { value = "storage", pipelines = ["storage"] },
-        { value = "archive", pipelines = ["archive"] },
-    ]
-}
-```
-
-### Example
-
-- Logs with "error" patterns are classified as "critical" and sent to Alertmanager
-- Performance metrics are classified as "warning" and sent to long-term storage
-- Debug logs are classified as "info" and sent to archive storage
-
-### API Endpoints
-
-The AI sorter sidecar exposes:
-- `POST /sort` - Classify telemetry data
-- `GET /health` - Health check endpoint
-
-## 🏗️ Architecture Overview
-
-```mermaid
-graph TB
-    subgraph "Applications"
-        APP1[Payment Service]
-        APP2[User Service]
-        APP3[Notification Service]
-    end
-    
-    subgraph "Grafana Alloy - Single Layer"
-        ALLOY[Grafana Alloy Agent]
-        
-        subgraph "Alloy Components"
-            RECV[OTLP Receivers]
-            DISC[Discovery Components]
-            PROC[Processors Pipeline]
-            EXP[Grafana Cloud Exporters]
-        end
-        
-        subgraph "Processing Pipeline"
-            MEM[Memory Limiter]
-            RES[Resource Detection]  
-            ATTR[Attributes Processor]
-            FILT[Filter Processor]
-            TRANS[Transform Processor]
-            BATCH[Batch Processor]
-        end
-    end
-    
-    subgraph "Grafana Cloud"
-        PROM[Prometheus]
-        TEMPO[Tempo]
-        LOKI[Loki]
-        GRAF[Grafana]
-    end
-    
-    subgraph "Local Monitoring"
-        PROM_LOCAL[Local Prometheus]
-        GRAF_LOCAL[Local Grafana]
-    end
-    
-    %% Data Flow
-    APP1 --> RECV
-    APP2 --> RECV
-    APP3 --> RECV
-    
-    RECV --> MEM --> RES --> ATTR --> FILT --> TRANS --> BATCH
-    
-    BATCH --> PROM
-    BATCH --> TEMPO
-    BATCH --> LOKI
-    
-    BATCH --> PROM_LOCAL
-    BATCH --> GRAF_LOCAL
-    
-    %% Discovery Integration
-    DISC -.-> RES
-    
-    %% Styling
-    classDef alloy fill:#f46800,color:#fff
-    classDef grafana fill:#f46800,color:#fff
-    classDef local fill:#e1f5fe
-    
-    class ALLOY,RECV,DISC,PROC,EXP alloy
-    class PROM,TEMPO,LOKI,GRAF grafana
-    class PROM_LOCAL,GRAF_LOCAL local
-```
-
-## 🔧 Alloy vs OTel Collector
-
-### Key Differences
-
-| Feature | OTel Collector | Grafana Alloy |
-|---------|----------------|---------------|
-| **Configuration Syntax** | YAML | River (HCL-like) |
-| **Architecture** | Multi-layer (Collector + Processor) | Single agent |
-| **Resource Usage** | Higher memory footprint | Optimized for efficiency |
-| **Grafana Integration** | Manual configuration | Built-in optimizations |
-| **Service Discovery** | Limited | Advanced Kubernetes/Docker discovery |
-| **UI/Debugging** | Basic | Rich UI and debugging tools |
-
-### Configuration Comparison
-
-**OTel Collector (YAML):**
-```yaml
-processors:
-  resourcedetection:
-    detectors: [docker, system, process]
-    docker:
-      resource_attributes:
-        host.name:
-          enabled: true
-```
-
-**Grafana Alloy (River):**
-```hcl
-otelcol.processor.resourcedetection "default" {
-  detectors = ["docker", "system", "process"]
-  
-  docker {
-    resource_attributes {
-      host_name {
-        enabled = true
-      }
-    }
-  }
-}
-```
-
-## ⚙️ Configuration
-
-### Available Configurations
-
-1. **Enhanced with Sorting** (`enhanced-with-sort.alloy`)
-   - Full dynamic processing pipeline
-   - Intelligent sorting capabilities
-   - Business priority rules
-
-2. **Basic Template** (`basic-template.alloy`)
-   - Minimal configuration
-   - Standard resource detection
-   - Basic filtering
-
-3. **Production Example** (`grafana-cloud-production.alloy`)
-   - Production-optimized settings
-   - Advanced security features
-   - Cost optimization
-
-### Key Components
-
-#### Resource Detection
-```hcl
-otelcol.processor.resourcedetection "default" {
-  detectors = ["docker", "system", "process", "env"]
-  
-  docker {
-    resource_attributes {
-      host_name { enabled = true }
-      container_image_name { enabled = true }
-      container_image_tag { enabled = true }
-    }
-  }
-}
-```
-
-#### Intelligent Labeling
-```hcl
-otelcol.processor.attributes "default" {
-  action {
-    key           = "grafana.service.name"
-    from_attribute = "service.name"
-    action        = "insert"
-  }
-  
-  action {
-    key     = "service.base_name"
-    from_attribute = "service.name"
-    action  = "extract"
-    pattern = "^(.*)-(dev|staging|prod)$"
-    to_attributes = ["service.base_name", "service.environment"]
-  }
-}
-```
-
-#### Intelligent Sorting
-```hcl
-otelcol.processor.transform "default" {
-  trace_statements {
-    statement = "set(attributes[\"sort.business_priority\"], 10) where resource.attributes[\"service.name\"] == \"payment-service\""
-  }
-  
-  trace_statements {  
-    statement = "set(attributes[\"sort.priority\"], 2) where span.status.code == SPAN_STATUS_CODE_ERROR"
-  }
-}
-```
-
-#### Environment-Based Filtering
-```hcl
-otelcol.processor.filter "default" {
-  traces {
-    span {
-      span_statement = "resource.attributes[\"environment\"] == \"dev\""
-    }
-  }
-}
-```
-
-## 🚀 Deployment
-
-### Docker Compose Deployment
-
-```bash
-# Basic deployment
-./scripts/deploy-alloy.sh deploy
-
-# With custom configuration
-./scripts/deploy-alloy.sh deploy --config basic-template
-
-# Production deployment
-./scripts/deploy-alloy.sh deploy --config grafana-cloud-production
-```
-
-### Kubernetes Deployment
-
-```bash
-# TODO: Create Helm chart for Alloy
-# kubectl apply -f alloy/k8s/
-```
-
-### Configuration Selection
-
-```bash
-# Use enhanced configuration (default)
-./scripts/deploy-alloy.sh deploy --config enhanced-with-sort
-
-# Use basic configuration
-./scripts/deploy-alloy.sh deploy --config basic-template
-
-# Use production configuration
-./scripts/deploy-alloy.sh deploy --config grafana-cloud-production
-```
-
-## 🧪 Testing
-
-### Comprehensive Test Suite
-
-```bash
-# Run all tests
-./scripts/test-alloy.sh
-
-# Test specific functionality
-./scripts/test-alloy.sh connectivity
-./scripts/test-alloy.sh resource
-./scripts/test-alloy.sh labeling
-./scripts/test-alloy.sh filtering
-./scripts/test-alloy.sh sorting
-./scripts/test-alloy.sh metrics
-./scripts/test-alloy.sh performance
-```
-
-### Test Results Example
-
-```
-==================================================
-  Grafana Alloy Dynamic Processors Test Suite
-==================================================
-[TEST] Testing basic connectivity
-[PASS] Health endpoint responding
-[PASS] OTLP HTTP endpoint accepting requests
-[PASS] Metrics endpoint serving data
-[PASS] Alloy UI endpoint responding
-
-[TEST] Testing intelligent sorting
-[PASS] Low priority span sent first
-[PASS] High priority span sent second
-
-[TEST] Testing performance under load
-[PASS] Performance test: 100/100 spans sent successfully in 1250ms
-
-==============================================
-  Test Summary
-==============================================
-Total Tests: 10
-Passed: 10
-Failed: 0
-
-All tests passed! ✓
-```
-
-## 📊 Monitoring
-
-### Alloy Metrics
-
-```bash
-# View Alloy metrics
-curl http://localhost:8889/metrics | grep otelcol_processor
-
-# Key metrics to monitor
-otelcol_processor_accepted_spans_total
-otelcol_processor_dropped_spans_total  
-otelcol_processor_batch_batch_size
-```
-
-### Grafana Dashboards
-
-Access pre-configured dashboards at:
-- **Local Grafana**: http://localhost:3000
-- **Grafana Cloud**: Your Grafana Cloud instance
-
-### Health Checks
-
-```bash
-# Alloy health
-curl http://localhost:13133
-
-# Service status
-./scripts/deploy-alloy.sh status
-```
-
-## 🔄 Migration Guide
-
-### From OTel Collector to Alloy
-
-1. **Configuration Migration**
+4. **Verify health**:
    ```bash
-   # Automatic conversion (conceptual)
-   alloy convert --source-format=otelcol --target-format=alloy \
-     config/processor-config-enhanced.yaml > alloy/configs/migrated.alloy
+   make health
+   # Or manually:
+   curl http://localhost:13133/healthz  # Alloy
+   curl http://localhost:9090/-/healthy # Prometheus
+   curl http://localhost:3100/ready     # Loki
    ```
 
-2. **Environment Variables**
-   - Same environment variables work
-   - No changes needed to `.env` file
+5. **Access UIs**:
+   - **Alloy UI**: http://localhost:12345
+   - **Grafana**: http://localhost:3000 (admin/admin)
+   - **Prometheus**: http://localhost:9090
+   - **AI Sorter Docs** *(if enabled)*: http://localhost:8080/docs
 
-3. **Docker Compose**
-   - Use `alloy-docker-compose.yml` instead of `docker-compose-enhanced.yaml`
-   - Same ports and volumes
+6. **Run end-to-end tests**:
+   ```bash
+   make test-e2e
+   ```
 
-4. **Testing**
-   - Use `./alloy/scripts/test-alloy.sh` instead of `./scripts/test-sort-processor.sh`
+7. **Stop the stack**:
+   ```bash
+   make down
+   ```
 
-### Migration Checklist
+### Kubernetes Deployment with Helm
 
-- [ ] Update configuration syntax (YAML → River)
-- [ ] Test resource detection functionality
-- [ ] Verify intelligent labeling works
-- [ ] Confirm filtering rules
-- [ ] Test sorting capabilities
-- [ ] Validate Grafana Cloud integration
-- [ ] Run performance tests
-- [ ] Update monitoring dashboards
+1. **Install to Kubernetes**:
+   ```bash
+   helm install alloy-processors ./alloy/helm/alloy-dynamic-processors \
+     --namespace monitoring \
+     --create-namespace \
+     --set grafanaCloud.enabled=true \
+     --set grafanaCloud.instanceId=YOUR_INSTANCE_ID \
+     --set grafanaCloud.apiKey=YOUR_API_KEY
+   ```
 
-## 🛠️ Troubleshooting
+2. **With AI Sorter enabled**:
+   ```bash
+   helm install alloy-processors ./alloy/helm/alloy-dynamic-processors \
+     --namespace monitoring \
+     --create-namespace \
+     --set aiSorter.enabled=true \
+     --set aiSorter.apiKey=YOUR_GROK_API_KEY \
+     --set grafanaCloud.enabled=true \
+     --set grafanaCloud.instanceId=YOUR_INSTANCE_ID \
+     --set grafanaCloud.apiKey=YOUR_API_KEY
+   ```
+
+3. **Verify deployment**:
+   ```bash
+   kubectl get pods -n monitoring
+   kubectl logs -n monitoring -l app.kubernetes.io/name=alloy-dynamic-processors
+   ```
+
+4. **Access services** (via port-forward):
+   ```bash
+   # Alloy UI
+   kubectl port-forward -n monitoring svc/alloy-processors 12345:12345
+
+   # AI Sorter (if enabled)
+   kubectl port-forward -n monitoring svc/alloy-processors-ai-sorter 8080:8080
+   ```
+
+5. **Upgrade release**:
+   ```bash
+   helm upgrade alloy-processors ./alloy/helm/alloy-dynamic-processors \
+     --namespace monitoring
+   ```
+
+6. **Uninstall**:
+   ```bash
+   helm uninstall alloy-processors --namespace monitoring
+   ```
+
+## 📋 Production Readiness Checklist
+
+Before deploying to production, verify:
+
+### Security
+- [ ] **Secrets Management**: All credentials stored in Kubernetes Secrets or external secret manager
+- [ ] **No Hardcoded Credentials**: Verified `.env.example` used, no real secrets committed
+- [ ] **Container Security**: Images scanned with Trivy, no critical/high vulnerabilities
+- [ ] **Image Signing**: Verify cosign signatures on all images
+- [ ] **RBAC**: ServiceAccount with least-privilege permissions configured
+- [ ] **NetworkPolicy**: Zero-trust networking enabled (if CNI supports)
+- [ ] **Non-Root Execution**: All containers run as non-root users
+- [ ] **PII Redaction**: Sensitive data patterns configured for your use case
+
+### Reliability
+- [ ] **High Availability**: HPA configured with appropriate min/max replicas (≥2 for HA)
+- [ ] **PodDisruptionBudget**: Set to prevent full outages during maintenance
+- [ ] **Resource Limits**: CPU/memory requests and limits tuned per environment
+- [ ] **Health Checks**: Liveness and readiness probes configured
+- [ ] **Circuit Breaker**: AI Sorter circuit breaker thresholds tuned (if enabled)
+- [ ] **Retry Logic**: Exponential backoff configured for external dependencies
+- [ ] **Graceful Shutdown**: SIGTERM handling tested
+
+### Observability
+- [ ] **Metrics Scraping**: Prometheus ServiceMonitor configured and scraping
+- [ ] **Dashboards**: Grafana dashboards imported and displaying data
+- [ ] **Alerts**: Prometheus alert rules configured and routing to Alertmanager
+- [ ] **Log Aggregation**: Logs flowing to Loki/centralized logging
+- [ ] **Distributed Tracing**: Traces flowing to Tempo/backend
+- [ ] **SLOs Defined**: Service level objectives established for key metrics
+
+### Operations
+- [ ] **Backups**: Persistent data (if any) backed up regularly
+- [ ] **Disaster Recovery**: Recovery procedures documented and tested
+- [ ] **Runbooks**: Operational procedures documented for common issues
+- [ ] **On-Call**: Team trained on troubleshooting and escalation
+- [ ] **Cost Monitoring**: Cloud costs tracked and alerts configured
+- [ ] **Release Process**: Automated CI/CD pipeline tested end-to-end
+
+### Performance
+- [ ] **Load Testing**: System tested at expected peak load (2-5x normal)
+- [ ] **Latency Benchmarks**: p95/p99 latencies within acceptable thresholds
+- [ ] **Batch Sizing**: Alloy batch processor tuned for throughput vs latency
+- [ ] **Rate Limiting**: AI Sorter rate limits configured appropriately
+- [ ] **Memory Limits**: Memory settings prevent OOM while allowing headroom
+- [ ] **Auto-Scaling**: HPA tested and scaling appropriately under load
+
+### Compliance
+- [ ] **Data Retention**: Policies configured per compliance requirements
+- [ ] **Audit Logging**: Access and changes logged for audit trail
+- [ ] **Data Residency**: Telemetry stored in compliant regions
+- [ ] **Encryption**: TLS enabled for all external communication
+- [ ] **Access Controls**: RBAC and NetworkPolicy enforce least privilege
+
+## 📊 Architecture
+
+```
+┌─────────────────┐
+│  Applications   │ (Instrumented with OTel SDKs)
+└────────┬────────┘
+         │ OTLP (gRPC/HTTP)
+         ▼
+┌─────────────────────────────────────────────────┐
+│           Grafana Alloy (Collector)             │
+│  ┌──────────────┐  ┌─────────────────────────┐ │
+│  │   Receivers  │→ │     Processors          │ │
+│  │  OTLP, Prom  │  │  Batch, Attributes,     │ │
+│  │              │  │  Resource, Transform    │ │
+│  └──────────────┘  └────────┬────────────────┘ │
+└───────────────────────────────┼──────────────────┘
+                                │
+         ┌──────────────────────┼──────────────────────┐
+         ▼                      ▼                      ▼
+┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐
+│  AI Sorter      │   │  Grafana Cloud  │   │  Local Stack    │
+│  (Optional)     │   │  - Tempo        │   │  - Prometheus   │
+│  - Grok API     │   │  - Loki         │   │  - Loki         │
+│  - Classification│   │  - Prometheus   │   │  - Tempo        │
+└─────────────────┘   └─────────────────┘   └─────────────────┘
+```
+
+See [docs/overview.md](docs/overview.md) for detailed architecture diagrams and component descriptions.
+
+## 🛠️ Development
+
+### Setup Development Environment
+
+```bash
+make setup
+```
+
+This will:
+- Create `.env` from `.env.example`
+- Install pre-commit hooks
+- Install Python dependencies
+
+### Common Development Tasks
+
+```bash
+make help           # Show all available targets
+make fmt            # Format all code (Alloy configs, Python, Shell)
+make lint           # Lint all code
+make test           # Run all tests
+make test-coverage  # Run tests with coverage report
+make build          # Build all Docker images
+make scan           # Scan images for vulnerabilities
+make ci             # Run full CI pipeline locally
+```
+
+### Pre-Commit Hooks
+
+Pre-commit hooks automatically run on `git commit`:
+- **Alloy configs**: Format with `alloy fmt`
+- **Python**: Format with `black`, `isort`, lint with `ruff`
+- **Shell scripts**: Lint with `shellcheck`, format with `shfmt`
+- **YAML/JSON**: Validate syntax
+- **Secrets**: Detect with `detect-secrets`
+
+To run manually:
+```bash
+make pre-commit
+# Or: pre-commit run --all-files
+```
+
+## 🐛 Troubleshooting
 
 ### Common Issues
 
-#### Alloy Container Won't Start
+**Issue**: Alloy fails to start with "port already in use"
 ```bash
-# Check container logs
-docker logs grafana-alloy
-
-# Verify configuration syntax
-# alloy fmt --verify alloy/configs/enhanced-with-sort.alloy
+# Solution: Check for existing processes
+lsof -i :4317
+lsof -i :4318
+# Kill conflicting processes or change ports in docker-compose.yaml
 ```
 
-#### Resource Detection Not Working
+**Issue**: AI Sorter circuit breaker is OPEN
 ```bash
-# Check Docker socket permissions
-ls -la /var/run/docker.sock
-
-# Verify container runs as root
-docker exec grafana-alloy id
+# Solution: Check AI Sorter logs and Grok API status
+docker compose logs ai-sorter
+# Verify API key is valid
+curl -H "Authorization: Bearer $GROK_API_KEY" https://api.x.ai/v1/chat/completions
+# Circuit breaker will auto-recover after timeout (default 60s)
 ```
 
-#### Grafana Cloud Connection Issues
+**Issue**: No metrics in Prometheus
 ```bash
-# Test credentials
-curl -u "${GRAFANA_CLOUD_INSTANCE_ID}:${GRAFANA_CLOUD_API_KEY}" \
-  "${GRAFANA_CLOUD_PROMETHEUS_URL}/api/v1/labels"
-
-# Check TLS configuration
-./scripts/test-alloy.sh cloud
-```
-
-#### Sorting Not Working
-```bash
-# Check sorted traces file
-cat tmp/sorted-traces.json | jq '.resourceSpans[].scopeSpans[].spans[] | .attributes."sort.business_priority"'
-
-# Verify transform processor
-curl http://localhost:8889/metrics | grep transform
-```
-
-### Debug Commands
-
-```bash
-# Enable debug logging
-export LOG_LEVEL=debug
-./scripts/deploy-alloy.sh restart
-
-# Check processing pipeline
-curl http://localhost:55679/debug/tracez
-
-# View detailed metrics
+# Solution: Verify Prometheus scrape targets
+curl http://localhost:9090/api/v1/targets
+# Check Alloy metrics endpoint
 curl http://localhost:8889/metrics
+# Check ServiceMonitor in Kubernetes
+kubectl get servicemonitor -n monitoring
 ```
 
-### Performance Tuning
-
-```hcl
-// Increase batch sizes for higher throughput
-otelcol.processor.batch "default" {
-  send_batch_size     = 2048
-  timeout             = "5s"
-  send_batch_max_size = 4096
-}
-
-// Increase memory limits
-otelcol.processor.memory_limiter "default" {
-  limit_mib      = 2048
-  spike_limit_mib = 512
-}
+**Issue**: Grafana dashboards show "No data"
+```bash
+# Solution: Verify data sources configured
+curl http://localhost:3000/api/datasources
+# Send test telemetry
+make test-e2e
 ```
 
-## 🎯 Advanced Features
-
-### Service Mesh Integration
-
-```hcl
-// Istio/Envoy integration
-otelcol.processor.attributes "mesh" {
-  action {
-    key           = "mesh.service.name"
-    from_attribute = "http.headers.x-envoy-original-dst-host"
-    action        = "insert"
-  }
-}
+**Issue**: NetworkPolicy blocks traffic in Kubernetes
+```bash
+# Solution: Temporarily disable to test
+helm upgrade alloy-processors ./alloy/helm/alloy-dynamic-processors \
+  --set networkPolicy.enabled=false
+# Check CNI plugin supports NetworkPolicy
+kubectl get nodes -o wide
 ```
 
-### Business Logic Processing
+See [docs/overview.md#troubleshooting](docs/overview.md#troubleshooting) for comprehensive troubleshooting guide.
 
-```hcl
-// Custom business rules
-otelcol.processor.transform "business" {
-  trace_statements {
-    statement = "set(attributes[\"business.transaction.value\"], attributes[\"order.total\"] * attributes[\"currency.rate\"]) where span.kind == \"server\""
-  }
-}
-```
+## 🔐 Security
 
-### Security & Compliance
+### Reporting Vulnerabilities
 
-```hcl
-// PII masking
-otelcol.processor.attributes "security" {
-  action {
-    key     = "user.email"
-    pattern = "^(.{2}).*@(.*)$"
-    action  = "update"
-    value   = "$1***@$2"
-  }
-}
-```
+Please report security vulnerabilities via the [Security Policy](SECURITY.md).
 
-## 🌟 Benefits of Alloy Version
+### Security Features
 
-1. **Simplified Architecture**: Single agent instead of multi-layer setup
-2. **Better Performance**: Optimized resource usage and processing
-3. **Modern Configuration**: River syntax is more readable and maintainable
-4. **Grafana Integration**: Built-in optimizations for Grafana Cloud
-5. **Advanced Discovery**: Better Kubernetes and Docker integration
-6. **Rich UI**: Built-in debugging and monitoring interface
-7. **Vendor Agnostic**: Can work with any OpenTelemetry-compatible backend
+- **Container Hardening**: Non-root users, read-only filesystem, minimal base images
+- **Supply Chain Security**: Signed images (cosign), SBOM generation (syft), vulnerability scanning (Trivy)
+- **Network Security**: NetworkPolicy for zero-trust networking, TLS for external communication
+- **Secret Management**: Kubernetes Secrets, no hardcoded credentials
+- **PII Redaction**: Automatic redaction of emails, SSNs, credit cards, API keys in logs
+- **Dependency Scanning**: Automated security scanning in CI/CD
+
+## 📈 Monitoring & Alerting
+
+### Grafana Dashboards
+
+- **Alloy Pipeline Health** (`monitoring/grafana/dashboards/alloy-pipeline-health.json`)
+  - Telemetry ingestion rate (spans, metrics, logs)
+  - Drop rate and export errors
+  - Memory usage and batch processing latency
+
+- **AI Sorter Performance** (`monitoring/grafana/dashboards/ai-sorter-performance.json`)
+  - Circuit breaker state
+  - Request rate and latency percentiles
+  - Items classified by category
+  - API call success rate
+
+### Prometheus Alerts
+
+20+ production-ready alerts in 4 groups (`monitoring/alerts/alloy-alerts.yaml`):
+- **Alloy Pipeline**: High drop rate, export failures, receiver errors
+- **AI Sorter**: Circuit breaker open, high latency, classification failures
+- **Resource Utilization**: High CPU/memory, pod not ready
+- **Data Quality**: Missing critical labels, high error log rate
 
 ## 🤝 Contributing
 
-Contributions to the Alloy version are welcome! Please:
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for:
+- Code of conduct
+- Development workflow
+- PR guidelines
+- Coding standards
+- Testing requirements
 
-1. Test your changes with `./scripts/test-alloy.sh`
-2. Update documentation as needed
-3. Follow River configuration best practices
-4. Ensure compatibility with Grafana Cloud
+## 📦 Release Process
 
-## 📚 Resources
+Releases follow [Semantic Versioning](https://semver.org/) and are automated via GitHub Actions:
 
-- [Grafana Alloy Documentation](https://grafana.com/docs/alloy/)
-- [River Configuration Language](https://grafana.com/docs/alloy/latest/reference/config-language/)
-- [OpenTelemetry Components](https://grafana.com/docs/alloy/latest/reference/components/otelcol/)
-- [Grafana Cloud Integration](https://grafana.com/docs/grafana-cloud/send-data/otlp/)
+1. Create release tag: `git tag -a v1.0.0 -m "Release v1.0.0"`
+2. Push tag: `git push origin v1.0.0`
+3. GitHub Actions automatically:
+   - Builds multi-arch images (amd64, arm64)
+   - Scans for vulnerabilities with Trivy
+   - Generates SBOM with syft
+   - Signs images with cosign (keyless OIDC)
+   - Pushes to GitHub Container Registry (GHCR)
+   - Creates GitHub Release with notes
+
+See [docs/release.md](docs/release.md) for detailed release procedures, checklists, and rollback procedures.
+
+## 📝 License
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- [Grafana Alloy](https://grafana.com/docs/alloy/) - Vendor-agnostic OTel distribution
+- [OpenTelemetry](https://opentelemetry.io/) - Observability framework
+- [xAI Grok](https://x.ai/) - AI-powered classification (optional integration)
+- [Grafana Cloud](https://grafana.com/products/cloud/) - Managed observability platform
+
+## 📞 Support
+
+- **GitHub Issues**: [Create an issue](https://github.com/ChaosKyle/alloy-dynamic-processors/issues)
+- **Documentation**: [docs/overview.md](docs/overview.md)
+- **Grafana Community**: [Forum](https://community.grafana.com/)
+- **Commercial Support**: [Grafana Labs](https://grafana.com/contact/)
 
 ---
 
-**Happy Processing with Grafana Alloy!** 🚀
-
-*This Alloy version provides identical functionality to the original OTel Collector implementation while being optimized for Grafana Cloud users and modern observability workflows.*
+**Built with ❤️ by the Alloy Dynamic Processors community**

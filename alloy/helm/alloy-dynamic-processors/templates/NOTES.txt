@@ -1,0 +1,189 @@
+================================================================================
+  Alloy Dynamic Processors Deployed Successfully!
+================================================================================
+
+Release Name:   {{ .Release.Name }}
+Namespace:      {{ .Release.Namespace }}
+Chart Version:  {{ .Chart.Version }}
+App Version:    {{ .Chart.AppVersion }}
+
+================================================================================
+  Service Endpoints
+================================================================================
+
+{{- if contains "NodePort" .Values.alloy.service.type }}
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "alloy-dynamic-processors.fullname" . }})
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo "Alloy HTTP API: http://$NODE_IP:$NODE_PORT"
+{{- else if contains "LoadBalancer" .Values.alloy.service.type }}
+  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "alloy-dynamic-processors.fullname" . }} --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
+  echo "Alloy HTTP API: http://$SERVICE_IP:{{ .Values.alloy.service.ports.http }}"
+{{- else if contains "ClusterIP" .Values.alloy.service.type }}
+
+  To access Alloy from your local machine, use kubectl port-forward:
+
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "alloy-dynamic-processors.fullname" . }} \
+    12345:{{ .Values.alloy.service.ports.http }} \
+    4317:{{ .Values.alloy.service.ports.otlp-grpc }} \
+    4318:{{ .Values.alloy.service.ports.otlp-http }} \
+    13133:{{ .Values.alloy.service.ports.health }} \
+    8889:{{ .Values.alloy.service.ports.metrics }}
+
+  Then access:
+  - Alloy UI:        http://localhost:12345
+  - Health Check:    http://localhost:13133/healthz
+  - Metrics:         http://localhost:8889/metrics
+  - OTLP gRPC:       localhost:4317
+  - OTLP HTTP:       localhost:4318
+{{- end }}
+
+{{- if .Values.aiSorter.enabled }}
+
+================================================================================
+  AI Sorter Configuration
+================================================================================
+
+AI Sorter is ENABLED and running as a sidecar.
+
+Features:
+  - AI-powered telemetry classification
+  - Smart routing based on severity
+  - Grok API integration
+
+To access AI Sorter:
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "alloy-dynamic-processors.fullname" . }}-ai-sorter 8080:8080
+
+  Then access:
+  - Health Check:    http://localhost:8080/healthz
+  - Readiness:       http://localhost:8080/readyz
+  - Metrics:         http://localhost:8080/metrics
+  - API Docs:        http://localhost:8080/docs
+
+{{- else }}
+
+================================================================================
+  AI Sorter Configuration
+================================================================================
+
+AI Sorter is DISABLED (feature flag off)
+
+To enable AI Sorter:
+  helm upgrade {{ .Release.Name }} {{ .Chart.Name }} \
+    --set aiSorter.enabled=true \
+    --set aiSorter.apiKey=<your-grok-api-key>
+
+{{- end }}
+
+================================================================================
+  Verification Steps
+================================================================================
+
+1. Check pod status:
+   kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+2. View logs:
+   kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "alloy-dynamic-processors.name" . }} -f
+
+3. Check health:
+   kubectl exec -n {{ .Release.Namespace }} deploy/{{ include "alloy-dynamic-processors.fullname" . }} -- \
+     curl -f http://localhost:13133/healthz
+
+4. View metrics:
+   kubectl exec -n {{ .Release.Namespace }} deploy/{{ include "alloy-dynamic-processors.fullname" . }} -- \
+     curl http://localhost:8889/metrics
+
+{{- if .Values.grafanaCloud.enabled }}
+
+================================================================================
+  Grafana Cloud Integration
+================================================================================
+
+Grafana Cloud integration is ENABLED.
+
+Your telemetry data is being sent to:
+  - Prometheus: {{ .Values.grafanaCloud.prometheus.url }}
+  - Loki:       {{ .Values.grafanaCloud.loki.url }}
+  - Tempo:      {{ .Values.grafanaCloud.tempo.url }}
+
+View your data at: https://grafana.com/orgs/<your-org>
+
+{{- end }}
+
+================================================================================
+  Monitoring & Observability
+================================================================================
+
+{{- if .Values.serviceMonitor.enabled }}
+Prometheus ServiceMonitor is ENABLED
+  kubectl get servicemonitor -n {{ .Release.Namespace }} {{ include "alloy-dynamic-processors.fullname" . }}
+{{- else }}
+Prometheus ServiceMonitor is DISABLED
+  To enable: helm upgrade --set serviceMonitor.enabled=true
+{{- end }}
+
+{{- if .Values.alloy.autoscaling.enabled }}
+
+HorizontalPodAutoscaler is ENABLED
+  Min replicas: {{ .Values.alloy.autoscaling.minReplicas }}
+  Max replicas: {{ .Values.alloy.autoscaling.maxReplicas }}
+
+  kubectl get hpa -n {{ .Release.Namespace }} {{ include "alloy-dynamic-processors.fullname" . }}
+{{- end }}
+
+{{- if .Values.alloy.podDisruptionBudget.enabled }}
+
+PodDisruptionBudget is ENABLED
+  kubectl get pdb -n {{ .Release.Namespace }} {{ include "alloy-dynamic-processors.fullname" . }}
+{{- end }}
+
+{{- if .Values.networkPolicy.enabled }}
+
+NetworkPolicy is ENABLED - egress is restricted
+  kubectl get networkpolicy -n {{ .Release.Namespace }}
+{{- end }}
+
+================================================================================
+  Useful Commands
+================================================================================
+
+Restart deployment:
+  kubectl rollout restart deployment/{{ include "alloy-dynamic-processors.fullname" . }} -n {{ .Release.Namespace }}
+
+View configuration:
+  kubectl get configmap -n {{ .Release.Namespace }} {{ include "alloy-dynamic-processors.fullname" . }}-config -o yaml
+
+Describe deployment:
+  kubectl describe deployment -n {{ .Release.Namespace }} {{ include "alloy-dynamic-processors.fullname" . }}
+
+Scale manually:
+  kubectl scale deployment/{{ include "alloy-dynamic-processors.fullname" . }} \
+    --replicas=<count> -n {{ .Release.Namespace }}
+
+================================================================================
+  Troubleshooting
+================================================================================
+
+If pods are not starting:
+  1. Check events: kubectl get events -n {{ .Release.Namespace }} --sort-by='.lastTimestamp'
+  2. Check logs: kubectl logs -n {{ .Release.Namespace }} deploy/{{ include "alloy-dynamic-processors.fullname" . }}
+  3. Describe pod: kubectl describe pod -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "alloy-dynamic-processors.name" . }}
+
+If metrics are not flowing:
+  1. Verify configuration: helm get values {{ .Release.Name }}
+  2. Check connectivity: kubectl exec -n {{ .Release.Namespace }} deploy/{{ include "alloy-dynamic-processors.fullname" . }} -- wget -O- http://localhost:8889/metrics
+  3. Review logs for export errors
+
+================================================================================
+  Documentation & Support
+================================================================================
+
+Documentation: https://github.com/ChaosKyle/alloy-dynamic-processors/docs
+Issues:        https://github.com/ChaosKyle/alloy-dynamic-processors/issues
+Discussions:   https://github.com/ChaosKyle/alloy-dynamic-processors/discussions
+
+For more information about Grafana Alloy:
+  https://grafana.com/docs/alloy/
+
+================================================================================
+
+Thank you for using Alloy Dynamic Processors! 🚀

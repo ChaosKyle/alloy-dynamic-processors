@@ -1,0 +1,146 @@
+# Git and version control
+.git/
+.gitignore
+.gitattributes
+.github/
+
+# Documentation
+*.md
+!README.md
+docs/
+LICENSE
+CODEOWNERS
+
+# CI/CD
+.pre-commit-config.yaml
+.secrets.baseline
+
+# Environment and configuration
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+*.pyc
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+*.cover
+.venv/
+venv/
+ENV/
+env/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+vendor/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+logs/
+tmp/
+*.tmp
+
+# Test files
+*_test.go
+test_*.py
+**/test/
+**/tests/
+
+# Docker
+docker-compose*.yml
+!docker-compose.yml
+Dockerfile*
+!Dockerfile
+.dockerignore
+
+# Kubernetes and Helm
+helm/
+charts/
+*.yaml
+*.yml
+!requirements.txt
+
+# Monitoring
+monitoring/
+dashboards/
+
+# Build artifacts
+target/
+bin/
+obj/
+
+# OS files
+Thumbs.db
+.DS_Store
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+
+# Temporary files
+*.bak
+*.backup
+*.swp
+*.swo
+.tmp/
+
+# Data directories
+data/
+docker-data/
+grafana-data/
+prometheus-data/
+loki-data/
+tempo-data/
+
+# Scripts (unless needed in container)
+scripts/
+!scripts/*.sh
+
+# Proto files (unless needed)
+proto/
+*.proto
+
+# Untracked development files
+c_server/
+go_client/
+alloy-low-latency-docker-compose.yml

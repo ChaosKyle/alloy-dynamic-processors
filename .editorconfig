@@ -1,0 +1,68 @@
+# EditorConfig helps maintain consistent coding styles across editors and IDEs
+# Visit https://editorconfig.org for more information
+
+root = true
+
+# Default settings for all files
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# Markdown files
+[*.md]
+trim_trailing_whitespace = false
+indent_size = 2
+
+# Python files
+[*.py]
+indent_size = 4
+max_line_length = 120
+
+# Go files
+[*.go]
+indent_style = tab
+indent_size = 4
+
+# Shell scripts
+[*.sh]
+indent_size = 2
+
+# YAML files
+[*.{yml,yaml}]
+indent_size = 2
+
+# JSON files
+[*.json]
+indent_size = 2
+
+# Alloy and River configuration files
+[*.{alloy,river}]
+indent_size = 2
+
+# Dockerfile
+[Dockerfile*]
+indent_size = 2
+
+# Makefile - must use tabs
+[{Makefile,makefile,*.mk}]
+indent_style = tab
+
+# Protobuf files
+[*.proto]
+indent_size = 2
+
+# C/C++ files
+[*.{c,h,cpp,hpp}]
+indent_size = 4
+
+# Configuration files
+[*.{conf,config,ini,toml}]
+indent_size = 2
+
+# XML, HTML, CSS
+[*.{xml,html,css,scss}]
+indent_size = 2
