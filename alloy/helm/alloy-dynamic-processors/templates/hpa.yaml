@@ -1,0 +1,86 @@
+{{- if .Values.alloy.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "alloy-dynamic-processors.fullname" . }}
+  labels:
+    {{- include "alloy-dynamic-processors.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "alloy-dynamic-processors.fullname" . }}
+  minReplicas: {{ .Values.alloy.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.alloy.autoscaling.maxReplicas }}
+  metrics:
+    {{- if .Values.alloy.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.alloy.autoscaling.targetCPUUtilizationPercentage }}
+    {{- end }}
+    {{- if .Values.alloy.autoscaling.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.alloy.autoscaling.targetMemoryUtilizationPercentage }}
+    {{- end }}
+    {{- with .Values.alloy.autoscaling.customMetrics }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: {{ .Values.alloy.autoscaling.behavior.scaleDown.stabilizationWindowSeconds | default 300 }}
+      policies:
+      - type: Percent
+        value: {{ .Values.alloy.autoscaling.behavior.scaleDown.percentValue | default 50 }}
+        periodSeconds: {{ .Values.alloy.autoscaling.behavior.scaleDown.periodSeconds | default 60 }}
+    scaleUp:
+      stabilizationWindowSeconds: {{ .Values.alloy.autoscaling.behavior.scaleUp.stabilizationWindowSeconds | default 0 }}
+      policies:
+      - type: Percent
+        value: {{ .Values.alloy.autoscaling.behavior.scaleUp.percentValue | default 100 }}
+        periodSeconds: {{ .Values.alloy.autoscaling.behavior.scaleUp.periodSeconds | default 15 }}
+      - type: Pods
+        value: {{ .Values.alloy.autoscaling.behavior.scaleUp.podsValue | default 2 }}
+        periodSeconds: {{ .Values.alloy.autoscaling.behavior.scaleUp.periodSeconds | default 15 }}
+      selectPolicy: Max
+{{- end }}
+---
+{{- if and .Values.aiSorter.enabled .Values.aiSorter.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "alloy-dynamic-processors.fullname" . }}-ai-sorter
+  labels:
+    {{- include "alloy-dynamic-processors.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ai-sorter
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "alloy-dynamic-processors.fullname" . }}-ai-sorter
+  minReplicas: {{ .Values.aiSorter.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.aiSorter.autoscaling.maxReplicas }}
+  metrics:
+    {{- if .Values.aiSorter.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.aiSorter.autoscaling.targetCPUUtilizationPercentage }}
+    {{- end }}
+    {{- if .Values.aiSorter.autoscaling.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.aiSorter.autoscaling.targetMemoryUtilizationPercentage }}
+    {{- end }}
+{{- end }}

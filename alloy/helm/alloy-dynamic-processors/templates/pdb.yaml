@@ -1,0 +1,39 @@
+{{- if .Values.alloy.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "alloy-dynamic-processors.fullname" . }}
+  labels:
+    {{- include "alloy-dynamic-processors.labels" . | nindent 4 }}
+spec:
+  {{- if .Values.alloy.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ .Values.alloy.podDisruptionBudget.minAvailable }}
+  {{- end }}
+  {{- if .Values.alloy.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ .Values.alloy.podDisruptionBudget.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "alloy-dynamic-processors.selectorLabels" . | nindent 6 }}
+{{- end }}
+---
+{{- if and .Values.aiSorter.enabled .Values.aiSorter.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "alloy-dynamic-processors.fullname" . }}-ai-sorter
+  labels:
+    {{- include "alloy-dynamic-processors.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ai-sorter
+spec:
+  {{- if .Values.aiSorter.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ .Values.aiSorter.podDisruptionBudget.minAvailable }}
+  {{- end }}
+  {{- if .Values.aiSorter.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ .Values.aiSorter.podDisruptionBudget.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "alloy-dynamic-processors.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: ai-sorter
+{{- end }}

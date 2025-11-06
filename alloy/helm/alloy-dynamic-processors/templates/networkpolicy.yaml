@@ -1,0 +1,166 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "alloy-dynamic-processors.fullname" . }}
+  labels:
+    {{- include "alloy-dynamic-processors.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "alloy-dynamic-processors.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow ingress from any pod in the namespace for OTLP receivers
+    - from:
+      {{- if .Values.networkPolicy.ingress.namespaceSelector }}
+      - namespaceSelector:
+          {{- toYaml .Values.networkPolicy.ingress.namespaceSelector | nindent 10 }}
+      {{- else }}
+      - namespaceSelector: {}
+      {{- end }}
+      {{- if .Values.networkPolicy.ingress.podSelector }}
+      - podSelector:
+          {{- toYaml .Values.networkPolicy.ingress.podSelector | nindent 10 }}
+      {{- end }}
+      ports:
+      - protocol: TCP
+        port: 4317  # OTLP gRPC
+      - protocol: TCP
+        port: 4318  # OTLP HTTP
+      - protocol: TCP
+        port: 12345 # HTTP API
+      - protocol: TCP
+        port: 13133 # Health check
+    # Allow Prometheus to scrape metrics
+    - from:
+      - namespaceSelector:
+          matchLabels:
+            {{- toYaml .Values.networkPolicy.monitoring.namespaceSelector | nindent 12 }}
+      - podSelector:
+          matchLabels:
+            {{- toYaml .Values.networkPolicy.monitoring.podSelector | nindent 12 }}
+      ports:
+      - protocol: TCP
+        port: 8889  # Metrics
+  egress:
+    # Allow DNS resolution
+    - to:
+      - namespaceSelector:
+          matchLabels:
+            name: kube-system
+      - podSelector:
+          matchLabels:
+            k8s-app: kube-dns
+      ports:
+      - protocol: UDP
+        port: 53
+    {{- if .Values.grafanaCloud.enabled }}
+    # Allow egress to Grafana Cloud
+    - to:
+      - namespaceSelector: {}
+      ports:
+      - protocol: TCP
+        port: 443  # HTTPS for Grafana Cloud
+      - protocol: TCP
+        port: 9095 # Loki
+    {{- else }}
+    # Allow egress to local Prometheus, Loki, Tempo
+    - to:
+      - podSelector:
+          matchLabels:
+            app: prometheus
+      ports:
+      - protocol: TCP
+        port: 9090
+    - to:
+      - podSelector:
+          matchLabels:
+            app: loki
+      ports:
+      - protocol: TCP
+        port: 3100
+    - to:
+      - podSelector:
+          matchLabels:
+            app: tempo
+      ports:
+      - protocol: TCP
+        port: 4317
+    {{- end }}
+    {{- if .Values.aiSorter.enabled }}
+    # Allow egress to AI Sorter
+    - to:
+      - podSelector:
+          matchLabels:
+            {{- include "alloy-dynamic-processors.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: ai-sorter
+      ports:
+      - protocol: TCP
+        port: 8080
+    {{- end }}
+    {{- with .Values.networkPolicy.egress.customRules }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}
+---
+{{- if and .Values.networkPolicy.enabled .Values.aiSorter.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "alloy-dynamic-processors.fullname" . }}-ai-sorter
+  labels:
+    {{- include "alloy-dynamic-processors.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ai-sorter
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "alloy-dynamic-processors.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: ai-sorter
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow ingress from Alloy only
+    - from:
+      - podSelector:
+          matchLabels:
+            {{- include "alloy-dynamic-processors.selectorLabels" . | nindent 12 }}
+      ports:
+      - protocol: TCP
+        port: 8080
+    # Allow Prometheus to scrape metrics
+    - from:
+      - namespaceSelector:
+          matchLabels:
+            {{- toYaml .Values.networkPolicy.monitoring.namespaceSelector | nindent 12 }}
+      - podSelector:
+          matchLabels:
+            {{- toYaml .Values.networkPolicy.monitoring.podSelector | nindent 12 }}
+      ports:
+      - protocol: TCP
+        port: 8080
+  egress:
+    # Allow DNS resolution
+    - to:
+      - namespaceSelector:
+          matchLabels:
+            name: kube-system
+      - podSelector:
+          matchLabels:
+            k8s-app: kube-dns
+      ports:
+      - protocol: UDP
+        port: 53
+    # Allow egress to AI API (e.g., xAI Grok)
+    - to:
+      - namespaceSelector: {}
+      ports:
+      - protocol: TCP
+        port: 443
+    {{- with .Values.networkPolicy.aiSorter.egress.customRules }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}
