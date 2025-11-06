@@ -1,0 +1,295 @@
+# =============================================================================
+# Prometheus Alert Rules for Alloy Dynamic Processors
+# =============================================================================
+# These alerts monitor the health and performance of the Alloy pipeline
+# and AI Sorter service. Adjust thresholds based on your SLOs.
+# =============================================================================
+
+groups:
+  # ===========================================================================
+  # Alloy Pipeline Alerts
+  # ===========================================================================
+  - name: alloy_pipeline
+    interval: 30s
+    rules:
+      - alert: AlloyHighDropRate
+        expr: |
+          rate(otelcol_processor_refused_spans[5m]) / rate(otelcol_receiver_accepted_spans[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: alloy
+        annotations:
+          summary: "High span drop rate detected"
+          description: "Alloy is dropping {{ $value | humanizePercentage }} of incoming spans. Check memory limits and batch processor configuration."
+
+      - alert: AlloyHighExportErrorRate
+        expr: |
+          rate(otelcol_exporter_send_failed_spans[5m]) / rate(otelcol_exporter_sent_spans[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          component: alloy
+        annotations:
+          summary: "High export error rate"
+          description: "Alloy export error rate is {{ $value | humanizePercentage }}. Check connectivity to backend services."
+
+      - alert: AlloyMemoryLimitApproaching
+        expr: |
+          process_resident_memory_bytes{job="alloy"} / otelcol_processor_memory_limiter_limit_bytes > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          component: alloy
+        annotations:
+          summary: "Memory usage approaching limit"
+          description: "Alloy memory usage is at {{ $value | humanizePercentage }} of the limit. Consider increasing memory or optimizing batch sizes."
+
+      - alert: AlloyQueueFull
+        expr: |
+          otelcol_exporter_queue_size / otelcol_exporter_queue_capacity > 0.90
+        for: 2m
+        labels:
+          severity: warning
+          component: alloy
+        annotations:
+          summary: "Export queue nearly full"
+          description: "Alloy exporter queue for {{ $labels.exporter }} is {{ $value | humanizePercentage }} full. Data may be dropped."
+
+      - alert: AlloyBatchProcessingLatencyHigh
+        expr: |
+          histogram_quantile(0.99, rate(otelcol_processor_batch_batch_send_duration_bucket[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: alloy
+        annotations:
+          summary: "High batch processing latency"
+          description: "P99 batch processing latency is {{ $value }}s. Check downstream service health."
+
+      - alert: AlloyReceiverDown
+        expr: |
+          up{job="alloy"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: alloy
+        annotations:
+          summary: "Alloy receiver is down"
+          description: "Alloy instance {{ $labels.instance }} is not responding to health checks."
+
+      - alert: AlloyNoDataReceived
+        expr: |
+          rate(otelcol_receiver_accepted_spans[5m]) == 0
+          and rate(otelcol_receiver_accepted_metric_points[5m]) == 0
+          and rate(otelcol_receiver_accepted_log_records[5m]) == 0
+        for: 10m
+        labels:
+          severity: warning
+          component: alloy
+        annotations:
+          summary: "No telemetry data received"
+          description: "Alloy has not received any telemetry data for 10 minutes. Check upstream applications."
+
+  # ===========================================================================
+  # AI Sorter Alerts
+  # ===========================================================================
+  - name: ai_sorter
+    interval: 30s
+    rules:
+      - alert: AISorterCircuitBreakerOpen
+        expr: |
+          ai_sorter_circuit_breaker_state == 1
+        for: 2m
+        labels:
+          severity: critical
+          component: ai-sorter
+        annotations:
+          summary: "AI Sorter circuit breaker is open"
+          description: "The circuit breaker has opened due to repeated AI API failures. AI classification is unavailable."
+
+      - alert: AISorterHighErrorRate
+        expr: |
+          rate(ai_sorter_requests_total{status="error"}[5m]) / rate(ai_sorter_requests_total[5m]) > 0.10
+        for: 5m
+        labels:
+          severity: critical
+          component: ai-sorter
+        annotations:
+          summary: "High error rate in AI Sorter"
+          description: "AI Sorter error rate is {{ $value | humanizePercentage }}. Check AI API connectivity and credentials."
+
+      - alert: AISorterHighLatency
+        expr: |
+          histogram_quantile(0.95, rate(ai_sorter_request_duration_seconds_bucket[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: ai-sorter
+        annotations:
+          summary: "High AI Sorter latency"
+          description: "P95 request latency is {{ $value }}s. AI API may be slow or overloaded."
+
+      - alert: AISorterAPILatencyHigh
+        expr: |
+          histogram_quantile(0.99, rate(ai_sorter_api_call_duration_seconds_bucket[5m])) > 15
+        for: 5m
+        labels:
+          severity: warning
+          component: ai-sorter
+        annotations:
+          summary: "High AI API call latency"
+          description: "P99 AI API call latency is {{ $value }}s. External AI service may be degraded."
+
+      - alert: AISorterFrequentCircuitBreakerOpens
+        expr: |
+          increase(ai_sorter_circuit_breaker_opens_total[1h]) > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: ai-sorter
+        annotations:
+          summary: "Frequent circuit breaker opens"
+          description: "Circuit breaker has opened {{ $value }} times in the last hour. AI API reliability is poor."
+
+      - alert: AISorterHighRateLimiting
+        expr: |
+          rate(ai_sorter_requests_total{status="rate_limited"}[5m]) / rate(ai_sorter_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: ai-sorter
+        annotations:
+          summary: "High rate limiting"
+          description: "{{ $value | humanizePercentage }} of requests are being rate limited. Consider increasing limits or scaling."
+
+      - alert: AISorterHighConcurrencyLimiting
+        expr: |
+          rate(ai_sorter_requests_total{status="concurrency_limited"}[5m]) / rate(ai_sorter_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: ai-sorter
+        annotations:
+          summary: "High concurrency limiting"
+          description: "{{ $value | humanizePercentage }} of requests hit concurrency limits. Consider increasing semaphore size or scaling horizontally."
+
+      - alert: AISorterDown
+        expr: |
+          up{job="ai-sorter"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: ai-sorter
+        annotations:
+          summary: "AI Sorter service is down"
+          description: "AI Sorter instance {{ $labels.instance }} is not responding."
+
+      - alert: AISorterNotReady
+        expr: |
+          ai_sorter_ready == 0
+        for: 5m
+        labels:
+          severity: warning
+          component: ai-sorter
+        annotations:
+          summary: "AI Sorter not ready"
+          description: "AI Sorter readiness check is failing. Check API key configuration and circuit breaker state."
+
+  # ===========================================================================
+  # Resource Utilization Alerts
+  # ===========================================================================
+  - name: resource_utilization
+    interval: 30s
+    rules:
+      - alert: HighCPUUsage
+        expr: |
+          rate(process_cpu_seconds_total{job=~"alloy|ai-sorter"}[5m]) > 0.80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage"
+          description: "{{ $labels.job }} CPU usage is {{ $value | humanizePercentage }}. Consider scaling or optimizing."
+
+      - alert: HighMemoryUsage
+        expr: |
+          process_resident_memory_bytes{job=~"alloy|ai-sorter"} /
+          (kube_pod_container_resource_limits{resource="memory"} or 2147483648) > 0.85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage"
+          description: "{{ $labels.job }} memory usage is {{ $value | humanizePercentage }} of limit."
+
+      - alert: HighGoRoutines
+        expr: |
+          go_goroutines{job=~"alloy|ai-sorter"} > 1000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High number of goroutines"
+          description: "{{ $labels.job }} has {{ $value }} active goroutines. May indicate goroutine leak."
+
+  # ===========================================================================
+  # Data Quality Alerts
+  # ===========================================================================
+  - name: data_quality
+    interval: 1m
+    rules:
+      - alert: HighCriticalClassificationRate
+        expr: |
+          rate(ai_sorter_items_classified_total{category="critical"}[10m]) /
+          rate(ai_sorter_items_classified_total[10m]) > 0.50
+        for: 10m
+        labels:
+          severity: warning
+          component: ai-sorter
+        annotations:
+          summary: "Unusually high critical classification rate"
+          description: "{{ $value | humanizePercentage }} of items are classified as critical. This may indicate a systemic issue."
+
+      - alert: LowClassificationConfidence
+        expr: |
+          avg(ai_sorter_classification_confidence) < 0.60
+        for: 10m
+        labels:
+          severity: info
+          component: ai-sorter
+        annotations:
+          summary: "Low classification confidence"
+          description: "Average classification confidence is {{ $value | humanizePercentage }}. AI model may need tuning."
+
+# =============================================================================
+# Alert Routing Configuration (for Alertmanager)
+# =============================================================================
+# Add to your Alertmanager configuration:
+#
+# route:
+#   group_by: ['alertname', 'component']
+#   group_wait: 10s
+#   group_interval: 10s
+#   repeat_interval: 12h
+#   receiver: 'team-observability'
+#   routes:
+#   - match:
+#       severity: critical
+#     receiver: 'pagerduty'
+#   - match:
+#       severity: warning
+#     receiver: 'slack'
+#
+# receivers:
+# - name: 'pagerduty'
+#   pagerduty_configs:
+#   - service_key: '<your-pagerduty-key>'
+# - name: 'slack'
+#   slack_configs:
+#   - api_url: '<your-slack-webhook>'
+#     channel: '#alerts'
+# - name: 'team-observability'
+#   email_configs:
+#   - to: 'observability@example.com'
+# =============================================================================

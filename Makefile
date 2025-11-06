@@ -134,6 +134,11 @@ up: ## Start all services with Docker Compose
 	@echo "$(GREEN)✓ Services started$(NC)"
 	@$(MAKE) status
 
+.PHONY: test-e2e
+test-e2e: ## Run end-to-end integration tests
+	@echo "$(BLUE)Running end-to-end tests...$(NC)"
+	@bash $(SCRIPTS_DIR)/test-e2e.sh
+
 .PHONY: up-ai
 up-ai: ## Start all services including AI Sorter
 	@echo "$(BLUE)Starting services with AI Sorter...$(NC)"

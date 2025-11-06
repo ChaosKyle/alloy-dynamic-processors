@@ -1,0 +1,74 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'alloy-low-latency-lab'
+    replica: 'prometheus-local'
+
+scrape_configs:
+  # Alloy metrics with low-latency processing info
+  - job_name: 'alloy-collector'
+    static_configs:
+      - targets: ['grafana-alloy:8889']
+    scrape_interval: 5s
+    metrics_path: '/metrics'
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'alloy-collector'
+
+  # Low-latency C++ server metrics (if exposed)
+  - job_name: 'low-latency-server'
+    static_configs:
+      - targets: ['alloy-low-latency-server:9001']
+    scrape_interval: 5s
+    metrics_path: '/metrics'
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'low-latency-server'
+    # Only scrape if metrics endpoint is available
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'up|grpc_.*|processing_.*'
+        action: keep
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    scrape_interval: 30s
+
+  # Test application metrics
+  - job_name: 'test-app'
+    static_configs:
+      - targets: ['test-app:8080']
+    scrape_interval: 15s
+    metrics_path: '/metrics'
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'test-application'
+
+  # Docker container metrics via cAdvisor (if available)
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    scrape_interval: 30s
+    metrics_path: '/metrics'
+    # Only scrape if cAdvisor is running
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'docker-containers'
+
+# Alerting rules for low-latency processing
+rule_files:
+  - "alert_rules.yml"
+
+# Alert manager configuration (optional)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets:
+#           - alertmanager:9093
