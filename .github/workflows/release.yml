@@ -1,0 +1,345 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., v1.0.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+  attestations: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME_ALLOY: ${{ github.repository }}/alloy
+  IMAGE_NAME_AI_SORTER: ${{ github.repository }}/ai-sorter
+
+jobs:
+  prepare-release:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get-version.outputs.version }}
+      tag: ${{ steps.get-version.outputs.tag }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Get version from tag
+      id: get-version
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          TAG="${{ github.event.inputs.tag }}"
+        else
+          TAG="${GITHUB_REF#refs/tags/}"
+        fi
+        VERSION="${TAG#v}"
+        echo "tag=${TAG}" >> $GITHUB_OUTPUT
+        echo "version=${VERSION}" >> $GITHUB_OUTPUT
+        echo "Release tag: ${TAG}"
+        echo "Release version: ${VERSION}"
+
+    - name: Validate version format
+      run: |
+        if ! echo "${{ steps.get-version.outputs.version }}" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$'; then
+          echo "Invalid version format: ${{ steps.get-version.outputs.version }}"
+          echo "Expected format: X.Y.Z or X.Y.Z-prerelease"
+          exit 1
+        fi
+
+  build-and-push-images:
+    name: Build & Push Images
+    runs-on: ubuntu-latest
+    needs: prepare-release
+    strategy:
+      matrix:
+        component:
+          - name: ai-sorter
+            context: ./alloy/processors/ai_sorter
+            dockerfile: ./alloy/processors/ai_sorter/Dockerfile
+            platforms: linux/amd64,linux/arm64
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.component.name }}
+        tags: |
+          type=semver,pattern={{version}},value=${{ needs.prepare-release.outputs.version }}
+          type=semver,pattern={{major}}.{{minor}},value=${{ needs.prepare-release.outputs.version }}
+          type=semver,pattern={{major}},value=${{ needs.prepare-release.outputs.version }}
+          type=sha,prefix=sha-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push Docker image
+      id: build-push
+      uses: docker/build-push-action@v5
+      with:
+        context: ${{ matrix.component.context }}
+        file: ${{ matrix.component.dockerfile }}
+        platforms: ${{ matrix.component.platforms }}
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        provenance: true
+        sbom: true
+
+    - name: Install cosign
+      uses: sigstore/cosign-installer@v3
+
+    - name: Sign container image (keyless)
+      env:
+        COSIGN_EXPERIMENTAL: 1
+      run: |
+        cosign sign --yes \
+          ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.component.name }}@${{ steps.build-push.outputs.digest }}
+
+    - name: Generate SBOM with syft
+      uses: anchore/sbom-action@v0
+      with:
+        image: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.component.name }}@${{ steps.build-push.outputs.digest }}
+        format: spdx-json
+        output-file: sbom-${{ matrix.component.name }}.spdx.json
+
+    - name: Upload SBOM artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: sbom-${{ matrix.component.name }}
+        path: sbom-${{ matrix.component.name }}.spdx.json
+        retention-days: 90
+
+    - name: Scan image with Trivy
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.component.name }}@${{ steps.build-push.outputs.digest }}
+        format: 'sarif'
+        output: 'trivy-${{ matrix.component.name }}.sarif'
+        severity: 'CRITICAL,HIGH'
+
+    - name: Upload Trivy results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: 'trivy-${{ matrix.component.name }}.sarif'
+
+  generate-release-notes:
+    name: Generate Release Notes
+    runs-on: ubuntu-latest
+    needs: prepare-release
+    outputs:
+      notes: ${{ steps.generate.outputs.notes }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Generate release notes
+      id: generate
+      run: |
+        VERSION="${{ needs.prepare-release.outputs.version }}"
+        TAG="${{ needs.prepare-release.outputs.tag }}"
+
+        # Get previous tag
+        PREV_TAG=$(git describe --tags --abbrev=0 ${TAG}^ 2>/dev/null || echo "")
+
+        # Generate changelog
+        cat > release-notes.md << EOF
+        # Release ${TAG}
+
+        ## What's Changed
+
+        EOF
+
+        if [ -n "$PREV_TAG" ]; then
+          echo "### Commits since ${PREV_TAG}" >> release-notes.md
+          echo "" >> release-notes.md
+          git log ${PREV_TAG}..${TAG} --pretty=format:"- %s (%h)" >> release-notes.md
+        else
+          echo "### All Commits" >> release-notes.md
+          echo "" >> release-notes.md
+          git log ${TAG} --pretty=format:"- %s (%h)" >> release-notes.md
+        fi
+
+        cat >> release-notes.md << EOF
+
+        ## Container Images
+
+        ### AI Sorter
+        \`\`\`bash
+        docker pull ${{ env.REGISTRY }}/${{ github.repository }}/ai-sorter:${VERSION}
+        \`\`\`
+
+        ## Installation
+
+        ### Docker Compose
+        \`\`\`bash
+        curl -O https://raw.githubusercontent.com/${{ github.repository }}/${TAG}/docker-compose.yml
+        # Edit .env with your configuration
+        docker compose up -d
+        \`\`\`
+
+        ### Kubernetes (Helm)
+        \`\`\`bash
+        helm repo add alloy-processors https://${{ github.repository_owner }}.github.io/alloy-dynamic-processors
+        helm install alloy-processors alloy-processors/alloy-dynamic-processors --version ${VERSION}
+        \`\`\`
+
+        ## Security
+
+        All container images are:
+        - Built with multi-arch support (amd64, arm64)
+        - Signed with cosign (keyless OIDC)
+        - Scanned for vulnerabilities with Trivy
+        - Include SBOM (Software Bill of Materials)
+        - Run as non-root users
+        - Use read-only root filesystems
+
+        ## Verification
+
+        Verify image signatures:
+        \`\`\`bash
+        COSIGN_EXPERIMENTAL=1 cosign verify \\
+          ${{ env.REGISTRY }}/${{ github.repository }}/ai-sorter:${VERSION}
+        \`\`\`
+
+        ## Full Changelog
+
+        **Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${TAG}
+
+        ---
+
+        **Note**: This is an automated release. See [CHANGELOG.md](CHANGELOG.md) for detailed changes.
+        EOF
+
+        # Save notes
+        echo "notes<<EOF" >> $GITHUB_OUTPUT
+        cat release-notes.md >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Upload release notes artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-notes
+        path: release-notes.md
+
+  create-github-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [prepare-release, build-and-push-images, generate-release-notes]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: release-artifacts/
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ needs.prepare-release.outputs.tag }}
+        name: Release ${{ needs.prepare-release.outputs.tag }}
+        body: ${{ needs.generate-release-notes.outputs.notes }}
+        draft: false
+        prerelease: ${{ contains(needs.prepare-release.outputs.version, '-') }}
+        files: |
+          release-artifacts/**/*.spdx.json
+          release-artifacts/**/*.sarif
+          release-artifacts/**/release-notes.md
+        generate_release_notes: true
+
+  update-helm-chart:
+    name: Update Helm Chart Version
+    runs-on: ubuntu-latest
+    needs: [prepare-release, build-and-push-images]
+    if: github.event_name != 'workflow_dispatch'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Update Chart.yaml
+      run: |
+        VERSION="${{ needs.prepare-release.outputs.version }}"
+
+        # Update Helm chart version if it exists
+        if [ -f alloy/helm/alloy-dynamic-processors/Chart.yaml ]; then
+          sed -i "s/^version:.*/version: ${VERSION}/" alloy/helm/alloy-dynamic-processors/Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${VERSION}\"/" alloy/helm/alloy-dynamic-processors/Chart.yaml
+
+          echo "Helm chart updated to version ${VERSION}"
+          cat alloy/helm/alloy-dynamic-processors/Chart.yaml
+        fi
+
+    - name: Commit chart version update
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+        if git diff --quiet; then
+          echo "No changes to commit"
+        else
+          git add alloy/helm/alloy-dynamic-processors/Chart.yaml
+          git commit -m "chore: bump Helm chart version to ${{ needs.prepare-release.outputs.version }}"
+          git push origin HEAD:main
+        fi
+
+  notify-release:
+    name: Notify Release
+    runs-on: ubuntu-latest
+    needs: [prepare-release, create-github-release]
+    if: always()
+
+    steps:
+    - name: Release summary
+      run: |
+        cat << EOF
+        ✅ Release ${{ needs.prepare-release.outputs.tag }} completed!
+
+        📦 Container Images:
+        - ${{ env.REGISTRY }}/${{ github.repository }}/ai-sorter:${{ needs.prepare-release.outputs.version }}
+
+        🔗 Release URL:
+        https://github.com/${{ github.repository }}/releases/tag/${{ needs.prepare-release.outputs.tag }}
+
+        📝 Next Steps:
+        1. Update CHANGELOG.md with detailed release notes
+        2. Announce release in relevant channels
+        3. Update documentation if needed
+        EOF
