@@ -1,6 +1,15 @@
+# Production Dockerfile for AI Sorter
+# See /containers/ai-sorter.Dockerfile for the fully hardened version
+# This is a simplified version for local development
+
 FROM python:3.11-slim
 
 WORKDIR /app
+
+# Install runtime dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first to leverage Docker layer caching
 COPY requirements.txt .
@@ -19,12 +28,12 @@ ENV PYTHONDONTWRITEBYTECODE=1
 RUN useradd --create-home --shell /bin/bash app && chown -R app:app /app
 USER app
 
-# Expose port
-EXPOSE 8000
+# Expose port (updated to 8080)
+EXPOSE 8080
 
-# Health check
+# Health check (updated endpoint)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:8080/healthz || exit 1
 
 # Run application
-CMD ["uvicorn", "ai_sorter:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "ai_sorter:app", "--host", "0.0.0.0", "--port", "8080"]
