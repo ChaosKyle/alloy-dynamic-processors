@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Kubernetes](https://img.shields.io/badge/kubernetes-%23326ce5.svg?style=flat&logo=kubernetes&logoColor=white)](https://kubernetes.io/)
 
-Production-ready **Grafana Alloy** telemetry processing with advanced resource detection, intelligent labeling strategies, optional AI-powered classification, and seamless Grafana Cloud integration.
+Almost -(see Enterprise tasks to help move along) Production-ready **Grafana Alloy** telemetry processing with advanced resource detection, intelligent labeling strategies, optional AI-powered classification, and seamless Grafana Cloud integration.
 
 ## 🎯 Features
 
@@ -401,3 +401,4 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 ---
 
 **Built with ❤️ by the Alloy Dynamic Processors community**
+
